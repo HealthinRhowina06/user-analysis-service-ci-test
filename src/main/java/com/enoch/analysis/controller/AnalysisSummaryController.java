@@ -27,7 +27,7 @@ public class AnalysisSummaryController {
     AnalysisSummaryService analysisSummaryService;
 
 
-    @GetMapping("/analysis/users/{userId}/summary")
+    @GetMapping("/an/users/{userId}/summary")
     public ResponseEntity<TopicDetailsResponse> getUserSummary(
             @PathVariable("userId") Long userId,
             @RequestHeader(value = "X-Institution-Id", required = false) Long institutionId
