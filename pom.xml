@@ -20,7 +20,7 @@
     <properties>
         <java.version>25</java.version>
         <spring-cloud.version>2025.0.1</spring-cloud.version>
-        <docker.image.name>vijayjeyam/devmexaanalysis</docker.image.name>
+        <docker.image.name>vijayjeyam/prodmexaanalysis</docker.image.name>
     </properties>
 
     <dependencyManagement>
