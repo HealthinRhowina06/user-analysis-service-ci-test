@@ -1,0 +1,8 @@
+/model/target/
+/.idea/
+/app/target/
+/common/target/
+/repo/target/
+/service/target/
+/scorer/target/
+/model/src/generated-sources/

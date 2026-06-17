@@ -1,0 +1,38 @@
+version: '3.3'
+
+networks:
+  default:
+    external:
+      name: devmexa
+
+services:
+  mexa-analysis:
+    container_name: devmexaanalysis
+    image: vijayjeyam/devmexaanalysis
+    ports:
+      - "9036:9035"
+    environment:
+      - SERVER_PORT=9035
+      - CLOUDCONFIG_HOST=devcloudconfig
+      - CLOUDCONFIG_PORT=9065
+      - CLOUDCONFIG_USER=psc
+      - CLOUDCONFIG_PASSWORD=psc123$$
+      - SPRING_APPLICATION_NAME=analysis
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_CLOUD_CONFIG_LABEL=main
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://devcloudconfig:9065
+      - SPRINGAPPLICATION_NAME=analysis
+      - SPRINGPROFILE=prod
+      - SPRINGCLOUD_LABLE=main
+      - EUREKA_HOST=devmexaeureka
+      - EUREKA_PORT=9085
+      - EUREKA_CLIENT_ENABLED=true
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://host.docker.internal:9085/eureka
+      - JAVA_TOOL_OPTIONS=-Deureka.client.service-url.defaultZone=http://host.docker.internal:9085/eureka
+    volumes:
+      - "/home/devserver/mexa/devresdir:/home/devserver/mexa/devresdir"
+      - 'my-cache:/home/devserver/mexa'
+
+volumes:
+  my-cache:
+    driver: local

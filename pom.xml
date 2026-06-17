@@ -7,7 +7,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>2.5.4</version>
+        <version>3.5.8</version>
         <relativePath/>
     </parent>
 
@@ -18,8 +18,9 @@
     <description>Standalone analytics microservice for user and questionnaire analysis</description>
 
     <properties>
-        <java.version>17</java.version>
-        <spring-cloud.version>2020.0.3</spring-cloud.version>
+        <java.version>25</java.version>
+        <spring-cloud.version>2025.0.1</spring-cloud.version>
+        <docker.image.name>vijayjeyam/prodmexaanalysis</docker.image.name>
     </properties>
 
     <dependencyManagement>
@@ -64,8 +65,8 @@
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
         <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
             <scope>runtime</scope>
         </dependency>
 
@@ -84,4 +85,58 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>docker</id>
+            <activation>
+                <activeByDefault>false</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>io.fabric8</groupId>
+                        <artifactId>docker-maven-plugin</artifactId>
+                        <version>0.45.1</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <verbose>true</verbose>
+                            <images>
+                                <image>
+                                    <name>${docker.image.name}</name>
+                                    <build>
+                                        <from>eclipse-temurin:25-jre-alpine</from>
+                                        <entryPoint>
+                                            <exec>
+                                                <args>java</args>
+                                                <args>-jar</args>
+                                                <args>/maven/${project.build.finalName}.jar</args>
+                                            </exec>
+                                        </entryPoint>
+                                        <assembly>
+                                            <descriptorRef>artifact</descriptorRef>
+                                        </assembly>
+                                        <tags>
+                                            <tag>${project.version}</tag>
+                                            <tag>latest</tag>
+                                        </tags>
+                                        <cleanup>none</cleanup>
+                                    </build>
+                                </image>
+                            </images>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>docker-build</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>build</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

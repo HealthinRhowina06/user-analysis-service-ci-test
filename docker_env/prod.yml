@@ -1,0 +1,36 @@
+version: '3.3'
+
+networks:
+  default:
+    external:
+      name: prodmexa
+
+services:
+  mexa-analysis:
+    container_name: prodmexaanalysis
+    image: vijayjeyam/prodmexaanalysis
+    ports:
+      - "9035:9035"
+    environment:
+      - SERVER_PORT=9035
+      - CLOUDCONFIG_HOST=prodcloudconfig
+      - CLOUDCONFIG_PORT=9065
+      - CLOUDCONFIG_USER=psc
+      - CLOUDCONFIG_PASSWORD=psc123$$
+      - SPRING_APPLICATION_NAME=analysis
+      - SPRING_PROFILES_ACTIVE=prod
+      - SPRING_CLOUD_CONFIG_LABEL=main
+      - SPRING_CONFIG_IMPORT=optional:configserver:http://prodcloudconfig:9065
+      - SPRINGAPPLICATION_NAME=analysis
+      - SPRINGPROFILE=prod
+      - SPRINGCLOUD_LABLE=main
+      - EUREKA_HOST=prodmexaeureka
+      - EUREKA_PORT=9085
+      - EUREKA_CLIENT_ENABLED=true
+    volumes:
+      - "/home/devserver/mexa/prodresdir:/home/devserver/mexa/prodresdir"
+      - 'my-cache:/home/devserver/mexa'
+
+volumes:
+  my-cache:
+    driver: local
