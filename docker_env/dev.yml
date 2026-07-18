@@ -12,7 +12,6 @@ services:
     ports:
       - "9036:9035"
     environment:
-      - SERVER_PORT=9035
       - SPRING_APPLICATION_NAME=analysis
       - SPRING_PROFILES_ACTIVE=prod
       - SPRING_CLOUD_CONFIG_LABEL=main
@@ -20,14 +19,6 @@ services:
       - CLOUDCONFIG_PORT=9065
       - CLOUDCONFIG_USER=psc
       - CLOUDCONFIG_PASSWORD=psc123$
-      - EUREKA_HOST=devmexaeureka
-      - EUREKA_PORT=9085
-      - EUREKA_CLIENT_ENABLED=true
-      - DB_HOST=devenochmysql
-      - DB_PORT=3306
-      - DB_NAME=psc
-      - DB_USERNAME=psc
-      - DB_PASSWORD=psc123$
     volumes:
       - 'my-analysis:/home/devserver/mexa'
 
