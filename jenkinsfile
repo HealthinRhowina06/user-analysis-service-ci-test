@@ -42,6 +42,9 @@ pipeline {
         }
 
         stage('Docker Build') {
+            when {
+                branch 'main'
+            }
             steps {
                 bat 'docker build -t user-analysis-service:%BUILD_NUMBER% .'
             }
@@ -51,15 +54,16 @@ pipeline {
     post {
 
         always {
-            junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
+            junit allowEmptyResults: true,
+                  testResults: 'target/surefire-reports/*.xml'
         }
 
         success {
-            echo 'BUILD + TEST + DOCKER BUILD SUCCESS'
+            echo 'CI PIPELINE SUCCESS'
         }
 
         failure {
-            echo 'PIPELINE FAILED - DOCKER DEPLOYMENT STOPPED'
+            echo 'TEST/BUILD FAILED - MERGE AND DEPLOYMENT MUST STOP'
         }
     }
 }
