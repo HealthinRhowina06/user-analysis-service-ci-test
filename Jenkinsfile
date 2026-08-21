@@ -16,19 +16,21 @@ pipeline {
         stage('Commit Details') {
             steps {
                 bat '''
+                echo ===== COMMIT DETAILS =====
                 git log -1 --pretty=format:"Author: %%an"
                 echo.
                 git log -1 --pretty=format:"Email: %%ae"
                 echo.
-                git rev-parse HEAD
+                git log -1 --pretty=format:"Commit ID: %%H"
+                echo.
                 git log -1 --pretty=format:"Message: %%s"
                 echo.
                 git log -1 --pretty=format:"Date: %%ad"
                 echo.
+                echo ==========================
                 '''
             }
         }
-
         stage('Build') {
             steps {
                 bat 'mvn clean compile'
