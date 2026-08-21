@@ -67,10 +67,13 @@ pipeline {
                     echo "========================"
 
                     if (percentage < 80) {
-                        error("TEST QUALITY GATE FAILED. Pass percentage is ${String.format('%.2f', percentage)}%")
+                        error(
+                            "TEST QUALITY GATE FAILED. " +
+                            "Pass percentage is ${String.format('%.2f', percentage)}%"
+                        )
                     }
 
-                    echo "TEST QUALITY GATE PASSED"
+                    echo 'TEST QUALITY GATE PASSED'
                 }
             }
         }
@@ -83,18 +86,110 @@ pipeline {
 
         stage('Docker Build') {
             steps {
-                bat '"C:\\Users\\hrhow\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe" build -t user-analysis-service:latest .'
+                bat '''
+                "C:\\Users\\hrhow\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe" build ^
+                -t user-analysis-service:latest .
+                '''
+            }
+        }
+
+        stage('Tag Docker Image') {
+            steps {
+                bat '''
+                "C:\\Users\\hrhow\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe" tag ^
+                user-analysis-service:latest ^
+                vijayjeyam/prodmexaanalysis:latest
+                '''
+            }
+        }
+
+        stage('Save Docker Image') {
+            steps {
+                bat '''
+                if exist app-image.tar del /F /Q app-image.tar
+
+                "C:\\Users\\hrhow\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe" save ^
+                -o app-image.tar ^
+                vijayjeyam/prodmexaanalysis:latest
+                '''
+            }
+        }
+
+        stage('Copy Image To Server') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'analysis-server-ssh',
+                        usernameVariable: 'SSH_USER',
+                        passwordVariable: 'SSH_PASS'
+                    )
+                ]) {
+                    bat '''
+                    pscp -batch ^
+                    -pw "%SSH_PASS%" ^
+                    app-image.tar ^
+                    %SSH_USER%@122.165.70.116:/home/mani/user-analysis-service/app-image.tar
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy On Server') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'analysis-server-ssh',
+                        usernameVariable: 'SSH_USER',
+                        passwordVariable: 'SSH_PASS'
+                    )
+                ]) {
+                    bat '''
+                    plink -batch ^
+                    -pw "%SSH_PASS%" ^
+                    %SSH_USER%@122.165.70.116 ^
+                    "cd /home/mani/user-analysis-service && docker load -i app-image.tar && docker compose -f docker_env/prod.yml up -d"
+                    '''
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'analysis-server-ssh',
+                        usernameVariable: 'SSH_USER',
+                        passwordVariable: 'SSH_PASS'
+                    )
+                ]) {
+                    bat '''
+                    plink -batch ^
+                    -pw "%SSH_PASS%" ^
+                    %SSH_USER%@122.165.70.116 ^
+                    "docker ps --filter name=prodmexaanalysis"
+                    '''
+                }
             }
         }
     }
 
     post {
+
         success {
-            echo 'CI PIPELINE SUCCESS - TEST PASS RATE IS 80% OR ABOVE'
+            echo '========================================='
+            echo 'CI/CD PIPELINE SUCCESS'
+            echo 'TEST PASS RATE IS 80% OR ABOVE'
+            echo 'DOCKER IMAGE BUILT'
+            echo 'IMAGE COPIED TO SERVER'
+            echo 'APPLICATION DEPLOYED'
+            echo '========================================='
         }
 
         failure {
-            echo 'CI PIPELINE FAILED - CHECK TEST RESULT / FAILURE REASON'
+            echo '========================================='
+            echo 'CI/CD PIPELINE FAILED'
+            echo 'CHECK TEST RESULT / BUILD / DOCKER / DEPLOYMENT ERROR'
+            echo '========================================='
         }
     }
 }
