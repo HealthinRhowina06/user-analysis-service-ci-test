@@ -67,7 +67,7 @@ pipeline {
 
         stage('Docker Build') {
             when {
-                branch 'main'
+                branch 'feature/ci-test'
             }
             steps {
                 bat 'docker build -t user-analysis-service:%BUILD_NUMBER% .'
