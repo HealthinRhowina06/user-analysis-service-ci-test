@@ -32,6 +32,27 @@ pipeline {
                 '''
             }
         }
+
+        stage('GitHub Status - Pending') {
+            steps {
+                withCredentials([
+                    string(
+                        credentialsId: 'github-status-token',
+                        variable: 'GITHUB_TOKEN'
+                    )
+                ]) {
+                    bat '''
+                    curl.exe -L -X POST ^
+                    -H "Authorization: Bearer %GITHUB_TOKEN%" ^
+                    -H "Accept: application/vnd.github+json" ^
+                    -H "X-GitHub-Api-Version: 2022-11-28" ^
+                    https://api.github.com/repos/HealthinRhowina06/user-analysis-service-ci-test/statuses/%GIT_COMMIT% ^
+                    -d "{\\"state\\":\\"pending\\",\\"context\\":\\"ci/jenkins\\",\\"description\\":\\"Jenkins CI is running\\"}"
+                    '''
+                }
+            }
+        }
+
         stage('Build') {
             steps {
                 bat 'mvn clean compile'
@@ -62,10 +83,42 @@ pipeline {
         }
 
         success {
+            withCredentials([
+                string(
+                    credentialsId: 'github-status-token',
+                    variable: 'GITHUB_TOKEN'
+                )
+            ]) {
+                bat '''
+                curl.exe -L -X POST ^
+                -H "Authorization: Bearer %GITHUB_TOKEN%" ^
+                -H "Accept: application/vnd.github+json" ^
+                -H "X-GitHub-Api-Version: 2022-11-28" ^
+                https://api.github.com/repos/HealthinRhowina06/user-analysis-service-ci-test/statuses/%GIT_COMMIT% ^
+                -d "{\\"state\\":\\"success\\",\\"context\\":\\"ci/jenkins\\",\\"description\\":\\"Build and unit tests passed\\"}"
+                '''
+            }
+
             echo 'CI PIPELINE SUCCESS'
         }
 
         failure {
+            withCredentials([
+                string(
+                    credentialsId: 'github-status-token',
+                    variable: 'GITHUB_TOKEN'
+                )
+            ]) {
+                bat '''
+                curl.exe -L -X POST ^
+                -H "Authorization: Bearer %GITHUB_TOKEN%" ^
+                -H "Accept: application/vnd.github+json" ^
+                -H "X-GitHub-Api-Version: 2022-11-28" ^
+                https://api.github.com/repos/HealthinRhowina06/user-analysis-service-ci-test/statuses/%GIT_COMMIT% ^
+                -d "{\\"state\\":\\"failure\\",\\"context\\":\\"ci/jenkins\\",\\"description\\":\\"Build or unit tests failed\\"}"
+                '''
+            }
+
             echo 'TEST/BUILD FAILED - MERGE AND DEPLOYMENT MUST STOP'
         }
     }

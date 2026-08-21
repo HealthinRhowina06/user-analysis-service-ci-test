@@ -8,6 +8,6 @@ class AnalysisApplicationTests {
 
     @Test
     void basicTest() {
-        assertTrue(true);
+        assertTrue(false);
     }
 }
