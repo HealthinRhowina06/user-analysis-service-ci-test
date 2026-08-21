@@ -44,6 +44,7 @@ pipeline {
         stage('80 Percent Test Gate') {
             steps {
                 script {
+
                     def result = junit(
                         allowEmptyResults: false,
                         testResults: 'target/surefire-reports/*.xml'
@@ -58,13 +59,13 @@ pipeline {
                         ? (passed * 100.0 / total)
                         : 0
 
-                    echo "===== TEST SUMMARY ====="
+                    echo '===== TEST SUMMARY ====='
                     echo "Total Tests   : ${total}"
                     echo "Passed        : ${passed}"
                     echo "Failed        : ${failed}"
                     echo "Skipped       : ${skipped}"
                     echo "Pass Percent  : ${String.format('%.2f', percentage)}%"
-                    echo "========================"
+                    echo '========================'
 
                     if (percentage < 80) {
                         error(
@@ -115,60 +116,63 @@ pipeline {
             }
         }
 
+        stage('Check SSH Tools') {
+            steps {
+                bat '''
+                echo ===== CHECKING SSH TOOLS =====
+                where ssh
+                where scp
+                ssh -V
+                echo ==============================
+                '''
+            }
+        }
+
         stage('Copy Image To Server') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'analysis-server-ssh',
-                        usernameVariable: 'SSH_USER',
-                        passwordVariable: 'SSH_PASS'
-                    )
-                ]) {
-                    bat '''
-                    pscp -batch ^
-                    -pw "%SSH_PASS%" ^
-                    app-image.tar ^
-                    %SSH_USER%@122.165.70.116:/home/mani/user-analysis-service/app-image.tar
-                    '''
-                }
+                bat '''
+                echo ===== COPYING IMAGE TO SERVER =====
+
+                scp ^
+                -o StrictHostKeyChecking=no ^
+                -i "C:\\Users\\hrhow\\.ssh\\id_ed25519" ^
+                app-image.tar ^
+                mani@122.165.70.116:/home/mani/user-analysis-service/app-image.tar
+
+                echo ===== IMAGE COPY COMPLETED =====
+                '''
             }
         }
 
         stage('Deploy On Server') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'analysis-server-ssh',
-                        usernameVariable: 'SSH_USER',
-                        passwordVariable: 'SSH_PASS'
-                    )
-                ]) {
-                    bat '''
-                    plink -batch ^
-                    -pw "%SSH_PASS%" ^
-                    %SSH_USER%@122.165.70.116 ^
-                    "cd /home/mani/user-analysis-service && docker load -i app-image.tar && docker compose -f docker_env/prod.yml up -d"
-                    '''
-                }
+                bat '''
+                echo ===== DEPLOYING ON SERVER =====
+
+                ssh ^
+                -o StrictHostKeyChecking=no ^
+                -i "C:\\Users\\hrhow\\.ssh\\id_ed25519" ^
+                mani@122.165.70.116 ^
+                "cd /home/mani/user-analysis-service && docker load -i app-image.tar && docker compose -f docker_env/prod.yml up -d"
+
+                echo ===== DEPLOYMENT COMMAND COMPLETED =====
+                '''
             }
         }
 
         stage('Verify Deployment') {
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'analysis-server-ssh',
-                        usernameVariable: 'SSH_USER',
-                        passwordVariable: 'SSH_PASS'
-                    )
-                ]) {
-                    bat '''
-                    plink -batch ^
-                    -pw "%SSH_PASS%" ^
-                    %SSH_USER%@122.165.70.116 ^
-                    "docker ps --filter name=prodmexaanalysis"
-                    '''
-                }
+                bat '''
+                echo ===== VERIFYING DEPLOYMENT =====
+
+                ssh ^
+                -o StrictHostKeyChecking=no ^
+                -i "C:\\Users\\hrhow\\.ssh\\id_ed25519" ^
+                mani@122.165.70.116 ^
+                "docker ps --filter name=prodmexaanalysis"
+
+                echo ===== DEPLOYMENT VERIFIED =====
+                '''
             }
         }
     }
