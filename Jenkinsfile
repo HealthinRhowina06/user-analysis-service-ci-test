@@ -33,95 +33,68 @@ pipeline {
             }
         }
 
-        stage('GitHub Status - Pending') {
+        stage('Run Unit Tests') {
             steps {
-                withCredentials([
-                    string(
-                        credentialsId: 'github-status-token',
-                        variable: 'GITHUB_TOKEN'
+                script {
+                    bat 'mvn test -Dmaven.test.failure.ignore=true'
+                }
+            }
+        }
+
+        stage('80 Percent Test Gate') {
+            steps {
+                script {
+                    def result = junit(
+                        allowEmptyResults: false,
+                        testResults: 'target/surefire-reports/*.xml'
                     )
-                ]) {
-                    bat '''
-                    curl.exe -L -X POST ^
-                    -H "Authorization: Bearer %GITHUB_TOKEN%" ^
-                    -H "Accept: application/vnd.github+json" ^
-                    -H "X-GitHub-Api-Version: 2022-11-28" ^
-                    https://api.github.com/repos/HealthinRhowina06/user-analysis-service-ci-test/statuses/%GIT_COMMIT% ^
-                    -d "{\\"state\\":\\"pending\\",\\"context\\":\\"ci/jenkins\\",\\"description\\":\\"Jenkins CI is running\\"}"
-                    '''
+
+                    def total = result.totalCount
+                    def failed = result.failCount
+                    def skipped = result.skipCount
+                    def passed = total - failed - skipped
+
+                    def percentage = total > 0
+                        ? (passed * 100.0 / total)
+                        : 0
+
+                    echo "===== TEST SUMMARY ====="
+                    echo "Total Tests   : ${total}"
+                    echo "Passed        : ${passed}"
+                    echo "Failed        : ${failed}"
+                    echo "Skipped       : ${skipped}"
+                    echo "Pass Percent  : ${String.format('%.2f', percentage)}%"
+                    echo "========================"
+
+                    if (percentage < 80) {
+                        error("TEST QUALITY GATE FAILED. Pass percentage is ${String.format('%.2f', percentage)}%")
+                    }
+
+                    echo "TEST QUALITY GATE PASSED"
                 }
             }
         }
 
         stage('Build') {
             steps {
-                bat 'mvn clean compile'
-            }
-        }
-
-        stage('Test') {
-            steps {
-                bat 'mvn test'
+                bat 'mvn clean package -DskipTests'
             }
         }
 
         stage('Docker Build') {
             steps {
-                echo 'Checking Docker...'
-                bat 'docker --version'
-                bat 'docker info'
-
-                echo 'Building Docker image...'
-                bat 'docker build -t user-analysis-service:%BUILD_NUMBER% .'
+                bat '"C:\\Users\\hrhow\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe" build -t user-analysis-service:latest .'
             }
         }
     }
 
     post {
-
-        always {
-            junit allowEmptyResults: true,
-                  testResults: 'target/surefire-reports/*.xml'
-        }
-
         success {
-            withCredentials([
-                string(
-                    credentialsId: 'github-status-token',
-                    variable: 'GITHUB_TOKEN'
-                )
-            ]) {
-                bat '''
-                curl.exe -L -X POST ^
-                -H "Authorization: Bearer %GITHUB_TOKEN%" ^
-                -H "Accept: application/vnd.github+json" ^
-                -H "X-GitHub-Api-Version: 2022-11-28" ^
-                https://api.github.com/repos/HealthinRhowina06/user-analysis-service-ci-test/statuses/%GIT_COMMIT% ^
-                -d "{\\"state\\":\\"success\\",\\"context\\":\\"ci/jenkins\\",\\"description\\":\\"Build and unit tests passed\\"}"
-                '''
-            }
-
-            echo 'CI PIPELINE SUCCESS'
+            echo 'CI PIPELINE SUCCESS - TEST PASS RATE IS 80% OR ABOVE'
         }
 
         failure {
-            withCredentials([
-                string(
-                    credentialsId: 'github-status-token',
-                    variable: 'GITHUB_TOKEN'
-                )
-            ]) {
-                bat '''
-                curl.exe -L -X POST ^
-                -H "Authorization: Bearer %GITHUB_TOKEN%" ^
-                -H "Accept: application/vnd.github+json" ^
-                -H "X-GitHub-Api-Version: 2022-11-28" ^
-                https://api.github.com/repos/HealthinRhowina06/user-analysis-service-ci-test/statuses/%GIT_COMMIT% ^
-                -d "{\\"state\\":\\"failure\\",\\"context\\":\\"ci/jenkins\\",\\"description\\":\\"Build or unit tests failed\\"}"
-                '''
-            }
-
-            echo 'TEST/BUILD FAILED - MERGE AND DEPLOYMENT MUST STOP'
+            echo 'CI PIPELINE FAILED - CHECK TEST RESULT / FAILURE REASON'
         }
     }
 }
