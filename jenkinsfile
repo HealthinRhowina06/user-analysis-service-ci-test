@@ -1,0 +1,65 @@
+pipeline {
+    agent any
+
+    tools {
+        maven 'Maven-3.9.16'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Commit Details') {
+            steps {
+                bat '''
+                git log -1 --pretty=format:"Author: %%an"
+                echo.
+                git log -1 --pretty=format:"Email: %%ae"
+                echo.
+                git rev-parse HEAD
+                git log -1 --pretty=format:"Message: %%s"
+                echo.
+                git log -1 --pretty=format:"Date: %%ad"
+                echo.
+                '''
+            }
+        }
+
+        stage('Build') {
+            steps {
+                bat 'mvn clean compile'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                bat 'mvn test'
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                bat 'docker build -t user-analysis-service:%BUILD_NUMBER% .'
+            }
+        }
+    }
+
+    post {
+
+        always {
+            junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
+        }
+
+        success {
+            echo 'BUILD + TEST + DOCKER BUILD SUCCESS'
+        }
+
+        failure {
+            echo 'PIPELINE FAILED - DOCKER DEPLOYMENT STOPPED'
+        }
+    }
+}
