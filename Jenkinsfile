@@ -169,19 +169,12 @@ Write-Host "========================================"
                 '''
 
                 script {
-                    def total =
-                        readFile('.ci_test_total.txt').trim()
-
-                    def passed =
-                        readFile('.ci_test_passed.txt').trim()
-
-                    def percentage =
-                        readFile('.ci_test_percent.txt').trim()
+                    def total = readFile('.ci_test_total.txt').trim()
+                    def passed = readFile('.ci_test_passed.txt').trim()
+                    def percentage = readFile('.ci_test_percent.txt').trim()
 
                     currentBuild.description =
                         "Tests: ${passed}/${total} | ${percentage}%"
-
-                    echo "Jenkins Card: Tests ${passed}/${total} | ${percentage}%"
                 }
             }
         }
@@ -197,7 +190,6 @@ Write-Host "========================================"
 
         stage('80 Percent Test Gate') {
             steps {
-
                 bat '''
                 @echo off
 
@@ -217,7 +209,7 @@ Write-Host "========================================"
                 echo Skipped:
                 type .ci_test_skipped.txt
 
-                echo Pass Percentage:
+                echo Percentage:
                 type .ci_test_percent.txt
 
                 echo Gate:
@@ -233,11 +225,9 @@ Write-Host "========================================"
                     exit /b 0
                 )
 
-                echo ========================================
                 echo TEST QUALITY GATE FAILED
                 echo TEST RESULT IS BELOW 80 PERCENT
-                echo DEPLOYMENT WILL NOT RUN
-                echo ========================================
+                echo DEPLOYMENT STOPPED
 
                 exit /b 1
                 '''
@@ -268,11 +258,7 @@ Write-Host "========================================"
                 -t %IMAGE_NAME%:%IMAGE_TAG% ^
                 .
 
-                echo ========================================
                 echo DOCKER IMAGE CREATED
-                echo %IMAGE_NAME%:%BUILD_NUMBER%
-                echo %IMAGE_NAME%:%IMAGE_TAG%
-                echo ========================================
                 '''
             }
         }
@@ -294,9 +280,7 @@ Write-Host "========================================"
 
                 dir app-image.tar
 
-                echo ========================================
                 echo DOCKER IMAGE SAVED
-                echo ========================================
                 '''
             }
         }
@@ -351,7 +335,7 @@ Write-Host "========================================"
                 %SERVER_USER%@%SERVER_IP% ^
                 "cd %SERVER_PATH% && docker load -i app-image.tar"
 
-                echo DOCKER IMAGE LOADED ON SERVER
+                echo DOCKER IMAGE LOADED
                 '''
             }
         }
@@ -407,8 +391,6 @@ Write-Host "========================================"
                 -i "%SSH_KEY%" ^
                 %SERVER_USER%@%SERVER_IP% ^
                 "docker ps --filter name=prodmexaanalysis"
-
-                echo ========================================
                 '''
             }
         }
@@ -427,9 +409,7 @@ Write-Host "========================================"
                 %SERVER_USER%@%SERVER_IP% ^
                 "for i in 1 2 3 4 5 6; do RESPONSE=$(curl -s http://localhost:9035/actuator/health); echo $RESPONSE; echo $RESPONSE | grep -q \\"UP\\" && exit 0; sleep 5; done; echo APPLICATION HEALTH CHECK FAILED; docker logs --tail 50 prodmexaanalysis; exit 1"
 
-                echo ========================================
                 echo APPLICATION HEALTH CHECK PASSED
-                echo ========================================
                 '''
             }
         }
@@ -452,7 +432,6 @@ Write-Host "========================================"
 $ErrorActionPreference = "Continue"
 
 function ReadValue($path, $default) {
-
     if (Test-Path $path) {
         return (Get-Content $path -Raw).Trim()
     }
@@ -489,7 +468,7 @@ function CsvSafe($value) {
 $header = @(
     "Build Number",
     "Branch",
-    "Author",
+    "Commit Author",
     "Email",
     "Commit ID",
     "Commit Message",
@@ -534,22 +513,22 @@ Write-Host "============================================"
 Write-Host "              CI HISTORY RECORD"
 Write-Host "============================================"
 
-Write-Host "Build No    : $($env:BUILD_NUMBER)"
-Write-Host "Author      : $author"
-Write-Host "Email       : $email"
-Write-Host "Commit ID   : $commitId"
-Write-Host "Message     : $message"
-Write-Host "Commit Date : $commitDate"
+Write-Host "Build No      : $($env:BUILD_NUMBER)"
+Write-Host "Commit Author : $author"
+Write-Host "Email         : $email"
+Write-Host "Commit ID     : $commitId"
+Write-Host "Message       : $message"
+Write-Host "Commit Date   : $commitDate"
 
-Write-Host "Total Tests : $total"
-Write-Host "Passed      : $passed"
-Write-Host "Failed      : $failed"
-Write-Host "Skipped     : $skipped"
-Write-Host "Pass Rate   : $percentage%"
-Write-Host "Test Gate   : $gate"
+Write-Host "Total Tests   : $total"
+Write-Host "Passed        : $passed"
+Write-Host "Failed        : $failed"
+Write-Host "Skipped       : $skipped"
+Write-Host "Pass Rate     : $percentage%"
+Write-Host "Test Gate     : $gate"
 
-Write-Host "Result      : $result"
-Write-Host "Deployment  : $deployment"
+Write-Host "Result        : $result"
+Write-Host "Deployment    : $deployment"
 
 Write-Host "============================================"
 '''
@@ -591,9 +570,9 @@ Write-Host "============================================"
             echo '============================================'
             echo '             CI/CD PIPELINE FAILED'
             echo '============================================'
+            echo 'If test percentage is below 80%,'
+            echo 'Docker build and deployment will NOT run.'
             echo 'Check the failed stage above.'
-            echo 'If test pass percentage is below 80%,'
-            echo 'Docker build and deployment are stopped.'
             echo '============================================'
         }
     }
