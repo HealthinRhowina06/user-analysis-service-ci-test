@@ -19,8 +19,6 @@ pipeline {
 
         SSH_KEY = 'C:\\Windows\\System32\\config\\systemprofile\\.ssh\\id_ed25519'
 
-        HISTORY_FILE = 'ci-history.csv'
-
         COMMIT_AUTHOR  = ''
         COMMIT_EMAIL   = ''
         COMMIT_ID      = ''
@@ -120,29 +118,29 @@ pipeline {
                     def passed  = total - failed - skipped
 
                     def percentage = total > 0
-                        ? (passed * 100.0 / total)
-                        : 0
+                        ? ((passed as double) * 100.0d / (total as double))
+                        : 0.0d
 
                     env.TEST_TOTAL   = "${total}"
                     env.TEST_PASSED  = "${passed}"
                     env.TEST_FAILED  = "${failed}"
                     env.TEST_SKIPPED = "${skipped}"
-                    env.TEST_PERCENT = String.format('%.2f', percentage)
+                    env.TEST_PERCENT = sprintf('%.2f', percentage)
 
                     echo '========================================'
                     echo '              TEST SUMMARY'
                     echo '========================================'
-                    echo "Total Tests  : ${total}"
-                    echo "Passed       : ${passed}"
-                    echo "Failed       : ${failed}"
-                    echo "Skipped      : ${skipped}"
+                    echo "Total Tests  : ${env.TEST_TOTAL}"
+                    echo "Passed       : ${env.TEST_PASSED}"
+                    echo "Failed       : ${env.TEST_FAILED}"
+                    echo "Skipped      : ${env.TEST_SKIPPED}"
                     echo "Pass Percent : ${env.TEST_PERCENT}%"
                     echo '========================================'
 
                     currentBuild.description =
-                        "Tests: ${passed}/${total} | ${env.TEST_PERCENT}%"
+                        "Tests: ${env.TEST_PASSED}/${env.TEST_TOTAL} | ${env.TEST_PERCENT}%"
 
-                    if (percentage < 80) {
+                    if (percentage < 80.0d) {
                         error(
                             "TEST QUALITY GATE FAILED - " +
                             "${env.TEST_PERCENT}% passed. " +
@@ -394,8 +392,7 @@ pipeline {
 
             script {
 
-                def finalResult =
-                    currentBuild.currentResult ?: 'UNKNOWN'
+                def finalResult = currentBuild.currentResult ?: 'UNKNOWN'
 
                 def deploymentResult =
                     finalResult == 'SUCCESS'
@@ -417,6 +414,10 @@ pipeline {
 
                 def safeEmail =
                     (env.COMMIT_EMAIL ?: '')
+                        .replace('"', '""')
+
+                def safeCommitDate =
+                    (env.COMMIT_DATE ?: '')
                         .replace('"', '""')
 
                 def header =
@@ -445,7 +446,7 @@ pipeline {
                     "\"${safeEmail}\"," +
                     "\"${env.COMMIT_ID ?: ''}\"," +
                     "\"${safeMessage}\"," +
-                    "\"${env.COMMIT_DATE ?: ''}\"," +
+                    "\"${safeCommitDate}\"," +
                     "\"${env.TEST_TOTAL ?: '0'}\"," +
                     "\"${env.TEST_PASSED ?: '0'}\"," +
                     "\"${env.TEST_FAILED ?: '0'}\"," +
@@ -460,11 +461,7 @@ pipeline {
 
                 writeFile(
                     file: historyFile,
-                    text:
-                        header +
-                        System.lineSeparator() +
-                        row +
-                        System.lineSeparator()
+                    text: "${header}\r\n${row}\r\n"
                 )
 
                 echo '============================================'
