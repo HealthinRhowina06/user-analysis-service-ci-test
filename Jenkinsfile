@@ -19,8 +19,6 @@ pipeline {
 
         SSH_KEY = 'C:\\Windows\\System32\\config\\systemprofile\\.ssh\\id_ed25519'
 
-        HISTORY_FILE = 'ci-history.csv'
-
         COMMIT_AUTHOR  = ''
         COMMIT_EMAIL   = ''
         COMMIT_ID      = ''
@@ -31,7 +29,7 @@ pipeline {
         TEST_PASSED  = '0'
         TEST_FAILED  = '0'
         TEST_SKIPPED = '0'
-        TEST_PERCENT = '0.00'
+        TEST_PERCENT = '0'
     }
 
     triggers {
@@ -50,35 +48,30 @@ pipeline {
             steps {
                 script {
 
-                    env.COMMIT_AUTHOR =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%an"',
-                            returnStdout: true
-                        ).trim()
+                    env.COMMIT_ID = bat(
+                        script: '@git rev-parse HEAD',
+                        returnStdout: true
+                    ).trim()
 
-                    env.COMMIT_EMAIL =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%ae"',
-                            returnStdout: true
-                        ).trim()
+                    env.COMMIT_AUTHOR = bat(
+                        script: '@git log -1 --format=%%an',
+                        returnStdout: true
+                    ).trim()
 
-                    env.COMMIT_ID =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%H"',
-                            returnStdout: true
-                        ).trim()
+                    env.COMMIT_EMAIL = bat(
+                        script: '@git log -1 --format=%%ae',
+                        returnStdout: true
+                    ).trim()
 
-                    env.COMMIT_MESSAGE =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%s"',
-                            returnStdout: true
-                        ).trim()
+                    env.COMMIT_MESSAGE = bat(
+                        script: '@git log -1 --format=%%s',
+                        returnStdout: true
+                    ).trim()
 
-                    env.COMMIT_DATE =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%ad"',
-                            returnStdout: true
-                        ).trim()
+                    env.COMMIT_DATE = bat(
+                        script: '@git log -1 --format=%%ad',
+                        returnStdout: true
+                    ).trim()
 
                     echo '========================================'
                     echo '             COMMIT DETAILS'
@@ -114,38 +107,38 @@ pipeline {
                         testResults: 'target/surefire-reports/*.xml'
                     )
 
-                    def total   = result.totalCount
-                    def failed  = result.failCount
-                    def skipped = result.skipCount
+                    def total   = result.totalCount as int
+                    def failed  = result.failCount as int
+                    def skipped = result.skipCount as int
                     def passed  = total - failed - skipped
 
                     def percentage = total > 0
-                        ? (passed * 100.0 / total)
+                        ? (passed * 100 / total)
                         : 0
 
                     env.TEST_TOTAL   = "${total}"
                     env.TEST_PASSED  = "${passed}"
                     env.TEST_FAILED  = "${failed}"
                     env.TEST_SKIPPED = "${skipped}"
-                    env.TEST_PERCENT = String.format('%.2f', percentage)
+                    env.TEST_PERCENT = "${percentage}"
 
                     echo '========================================'
                     echo '              TEST SUMMARY'
                     echo '========================================'
-                    echo "Total Tests  : ${total}"
-                    echo "Passed       : ${passed}"
-                    echo "Failed       : ${failed}"
-                    echo "Skipped      : ${skipped}"
+                    echo "Total Tests  : ${env.TEST_TOTAL}"
+                    echo "Passed       : ${env.TEST_PASSED}"
+                    echo "Failed       : ${env.TEST_FAILED}"
+                    echo "Skipped      : ${env.TEST_SKIPPED}"
                     echo "Pass Percent : ${env.TEST_PERCENT}%"
                     echo '========================================'
 
                     currentBuild.description =
-                        "Tests: ${passed}/${total} | ${env.TEST_PERCENT}%"
+                        "Tests: ${env.TEST_PASSED}/${env.TEST_TOTAL} | ${env.TEST_PERCENT}%"
 
                     if (percentage < 80) {
                         error(
                             "TEST QUALITY GATE FAILED - " +
-                            "${env.TEST_PERCENT}% passed. " +
+                            "${env.TEST_PERCENT}% tests passed. " +
                             "Minimum required is 80%."
                         )
                     }
@@ -391,7 +384,6 @@ pipeline {
         }
 
         always {
-
             script {
 
                 def finalResult =
@@ -417,6 +409,10 @@ pipeline {
 
                 def safeEmail =
                     (env.COMMIT_EMAIL ?: '')
+                        .replace('"', '""')
+
+                def safeCommitDate =
+                    (env.COMMIT_DATE ?: '')
                         .replace('"', '""')
 
                 def header =
@@ -445,12 +441,12 @@ pipeline {
                     "\"${safeEmail}\"," +
                     "\"${env.COMMIT_ID ?: ''}\"," +
                     "\"${safeMessage}\"," +
-                    "\"${env.COMMIT_DATE ?: ''}\"," +
+                    "\"${safeCommitDate}\"," +
                     "\"${env.TEST_TOTAL ?: '0'}\"," +
                     "\"${env.TEST_PASSED ?: '0'}\"," +
                     "\"${env.TEST_FAILED ?: '0'}\"," +
                     "\"${env.TEST_SKIPPED ?: '0'}\"," +
-                    "\"${env.TEST_PERCENT ?: '0.00'}%\"," +
+                    "\"${env.TEST_PERCENT ?: '0'}%\"," +
                     "\"${finalResult}\"," +
                     "\"${deploymentResult}\"," +
                     "\"${env.BUILD_URL ?: ''}\""
@@ -460,11 +456,7 @@ pipeline {
 
                 writeFile(
                     file: historyFile,
-                    text:
-                        header +
-                        System.lineSeparator() +
-                        row +
-                        System.lineSeparator()
+                    text: "${header}\r\n${row}\r\n"
                 )
 
                 echo '============================================'
