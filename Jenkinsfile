@@ -7,13 +7,17 @@ pipeline {
     }
 
     environment {
+
         DOCKER_EXE = 'C:\\Users\\hrhow\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin\\docker.exe'
 
         IMAGE_NAME = 'vijayjeyam/prodmexaanalysis'
         IMAGE_TAG  = 'latest'
 
+        SERVER_USER = 'mani'
         SERVER_IP   = '122.165.70.116'
         SERVER_PATH = '/home/mani/user-analysis-service'
+
+        SSH_KEY = 'C:\\Windows\\System32\\config\\systemprofile\\.ssh\\id_ed25519'
     }
 
     triggers {
@@ -59,7 +63,7 @@ pipeline {
             steps {
                 bat '''
                 echo ========================================
-                echo            RUN UNIT TESTS
+                echo             RUN UNIT TESTS
                 echo ========================================
 
                 mvn test -Dmaven.test.failure.ignore=true
@@ -88,17 +92,20 @@ pipeline {
                     echo '========================================'
                     echo '              TEST SUMMARY'
                     echo '========================================'
+
                     echo "Total Tests  : ${total}"
                     echo "Passed       : ${passed}"
                     echo "Failed       : ${failed}"
                     echo "Skipped      : ${skipped}"
                     echo "Pass Percent : ${String.format('%.2f', percentage)}%"
+
                     echo '========================================'
 
                     currentBuild.description =
                         "Tests: ${passed}/${total} | ${String.format('%.2f', percentage)}%"
 
                     if (percentage < 80) {
+
                         error(
                             "TEST QUALITY GATE FAILED - " +
                             "${String.format('%.2f', percentage)}% passed. " +
@@ -171,183 +178,144 @@ pipeline {
 
         stage('Check SSH Connection') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'analysis-server-ssh-key',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    bat '''
-                    echo ========================================
-                    echo          CHECK SSH CONNECTION
-                    echo ========================================
+                bat '''
+                echo ========================================
+                echo          CHECK SSH CONNECTION
+                echo ========================================
 
-                    ssh ^
-                    -o BatchMode=yes ^
-                    -o StrictHostKeyChecking=no ^
-                    -i "%SSH_KEY_FILE%" ^
-                    %SSH_USER%@%SERVER_IP% ^
-                    "echo SSH CONNECTION SUCCESS"
-                    '''
-                }
+                ssh ^
+                -o BatchMode=yes ^
+                -o StrictHostKeyChecking=no ^
+                -i "%SSH_KEY%" ^
+                %SERVER_USER%@%SERVER_IP% ^
+                "echo SSH CONNECTION SUCCESS"
+
+                echo ========================================
+                '''
             }
         }
 
         stage('Transfer Docker Image') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'analysis-server-ssh-key',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    bat '''
-                    echo ========================================
-                    echo        TRANSFER DOCKER IMAGE
-                    echo ========================================
+                bat '''
+                echo ========================================
+                echo         TRANSFER DOCKER IMAGE
+                echo ========================================
 
-                    scp ^
-                    -o BatchMode=yes ^
-                    -o StrictHostKeyChecking=no ^
-                    -i "%SSH_KEY_FILE%" ^
-                    app-image.tar ^
-                    %SSH_USER%@%SERVER_IP%:%SERVER_PATH%/app-image.tar
+                scp ^
+                -o BatchMode=yes ^
+                -o StrictHostKeyChecking=no ^
+                -i "%SSH_KEY%" ^
+                app-image.tar ^
+                %SERVER_USER%@%SERVER_IP%:%SERVER_PATH%/app-image.tar
 
-                    echo ========================================
-                    echo IMAGE TRANSFER COMPLETED
-                    echo ========================================
-                    '''
-                }
+                echo ========================================
+                echo IMAGE TRANSFER COMPLETED
+                echo ========================================
+                '''
             }
         }
 
         stage('Docker Load On Server') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'analysis-server-ssh-key',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    bat '''
-                    echo ========================================
-                    echo         DOCKER LOAD ON SERVER
-                    echo ========================================
+                bat '''
+                echo ========================================
+                echo         DOCKER LOAD ON SERVER
+                echo ========================================
 
-                    ssh ^
-                    -o BatchMode=yes ^
-                    -o StrictHostKeyChecking=no ^
-                    -i "%SSH_KEY_FILE%" ^
-                    %SSH_USER%@%SERVER_IP% ^
-                    "cd %SERVER_PATH% && docker load -i app-image.tar"
-                    '''
-                }
+                ssh ^
+                -o BatchMode=yes ^
+                -o StrictHostKeyChecking=no ^
+                -i "%SSH_KEY%" ^
+                %SERVER_USER%@%SERVER_IP% ^
+                "cd %SERVER_PATH% && docker load -i app-image.tar"
+
+                echo ========================================
+                echo DOCKER IMAGE LOADED ON SERVER
+                echo ========================================
+                '''
             }
         }
 
         stage('Check Docker Network') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'analysis-server-ssh-key',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    bat '''
-                    echo ========================================
-                    echo          CHECK DOCKER NETWORK
-                    echo ========================================
+                bat '''
+                echo ========================================
+                echo          CHECK DOCKER NETWORK
+                echo ========================================
 
-                    ssh ^
-                    -o BatchMode=yes ^
-                    -o StrictHostKeyChecking=no ^
-                    -i "%SSH_KEY_FILE%" ^
-                    %SSH_USER%@%SERVER_IP% ^
-                    "docker network inspect prodmexa >/dev/null 2>&1 || docker network create prodmexa"
-                    '''
-                }
+                ssh ^
+                -o BatchMode=yes ^
+                -o StrictHostKeyChecking=no ^
+                -i "%SSH_KEY%" ^
+                %SERVER_USER%@%SERVER_IP% ^
+                "docker network inspect prodmexa >/dev/null 2>&1 || docker network create prodmexa"
+
+                echo ========================================
+                echo DOCKER NETWORK READY
+                echo ========================================
+                '''
             }
         }
 
         stage('Docker Compose Deploy') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'analysis-server-ssh-key',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    bat '''
-                    echo ========================================
-                    echo          DOCKER COMPOSE DEPLOY
-                    echo ========================================
+                bat '''
+                echo ========================================
+                echo          DOCKER COMPOSE DEPLOY
+                echo ========================================
 
-                    ssh ^
-                    -o BatchMode=yes ^
-                    -o StrictHostKeyChecking=no ^
-                    -i "%SSH_KEY_FILE%" ^
-                    %SSH_USER%@%SERVER_IP% ^
-                    "cd %SERVER_PATH% && docker compose -f docker_env/prod.yml up -d --force-recreate"
-                    '''
-                }
+                ssh ^
+                -o BatchMode=yes ^
+                -o StrictHostKeyChecking=no ^
+                -i "%SSH_KEY%" ^
+                %SERVER_USER%@%SERVER_IP% ^
+                "cd %SERVER_PATH% && docker compose -f docker_env/prod.yml up -d --force-recreate"
+
+                echo ========================================
+                echo DOCKER COMPOSE DEPLOY COMPLETED
+                echo ========================================
+                '''
             }
         }
 
         stage('Verify Container') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'analysis-server-ssh-key',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
-                    bat '''
-                    echo ========================================
-                    echo           VERIFY CONTAINER
-                    echo ========================================
+                bat '''
+                echo ========================================
+                echo            VERIFY CONTAINER
+                echo ========================================
 
-                    ssh ^
-                    -o BatchMode=yes ^
-                    -o StrictHostKeyChecking=no ^
-                    -i "%SSH_KEY_FILE%" ^
-                    %SSH_USER%@%SERVER_IP% ^
-                    "docker ps --filter name=prodmexaanalysis"
+                ssh ^
+                -o BatchMode=yes ^
+                -o StrictHostKeyChecking=no ^
+                -i "%SSH_KEY%" ^
+                %SERVER_USER%@%SERVER_IP% ^
+                "docker ps --filter name=prodmexaanalysis"
 
-                    echo ========================================
-                    '''
-                }
+                echo ========================================
+                '''
             }
         }
 
         stage('Health Check') {
             steps {
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'analysis-server-ssh-key',
-                        keyFileVariable: 'SSH_KEY_FILE',
-                        usernameVariable: 'SSH_USER'
-                    )
-                ]) {
+                bat '''
+                echo ========================================
+                echo              HEALTH CHECK
+                echo ========================================
 
-                    bat '''
-                    echo ========================================
-                    echo             HEALTH CHECK
-                    echo ========================================
+                ssh ^
+                -o BatchMode=yes ^
+                -o StrictHostKeyChecking=no ^
+                -i "%SSH_KEY%" ^
+                %SERVER_USER%@%SERVER_IP% ^
+                "for i in 1 2 3 4 5 6; do RESPONSE=$(curl -s http://localhost:9035/actuator/health); echo $RESPONSE; echo $RESPONSE | grep -q \\"UP\\" && exit 0; sleep 5; done; echo APPLICATION HEALTH CHECK FAILED; docker logs --tail 50 prodmexaanalysis; exit 1"
 
-                    ssh ^
-                    -o BatchMode=yes ^
-                    -o StrictHostKeyChecking=no ^
-                    -i "%SSH_KEY_FILE%" ^
-                    %SSH_USER%@%SERVER_IP% ^
-                    "for i in 1 2 3 4 5 6; do RESPONSE=$(curl -s http://localhost:9035/actuator/health); echo $RESPONSE; echo $RESPONSE | grep -q \\"UP\\" && exit 0; sleep 5; done; echo APPLICATION HEALTH CHECK FAILED; docker logs --tail 50 prodmexaanalysis; exit 1"
-                    '''
-                }
+                echo ========================================
+                echo APPLICATION HEALTH CHECK PASSED
+                echo ========================================
+                '''
             }
         }
     }
@@ -355,6 +323,7 @@ pipeline {
     post {
 
         success {
+
             echo '============================================'
             echo '            CI/CD PIPELINE SUCCESS'
             echo '============================================'
@@ -366,6 +335,7 @@ pipeline {
             echo 'SSH Connection      : SUCCESS'
             echo 'Server Transfer     : SUCCESS'
             echo 'Docker Load         : SUCCESS'
+            echo 'Docker Network      : READY'
             echo 'Docker Compose      : SUCCESS'
             echo 'Container           : RUNNING'
             echo 'Application Health  : UP'
@@ -373,17 +343,20 @@ pipeline {
         }
 
         failure {
+
             echo '============================================'
             echo '             CI/CD PIPELINE FAILED'
             echo '============================================'
             echo 'Check the failed stage above.'
             echo 'If tests are below 80%, deployment stops.'
-            echo 'If SSH fails, check Jenkins SSH credential.'
+            echo 'If SSH fails, check Jenkins SYSTEM SSH key.'
             echo 'If deployment fails, check Docker logs.'
+            echo 'If health check fails, deployment is marked failed.'
             echo '============================================'
         }
 
         always {
+
             archiveArtifacts(
                 artifacts: 'target/surefire-reports/**',
                 allowEmptyArchive: true
