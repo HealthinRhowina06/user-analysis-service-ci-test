@@ -12,12 +12,8 @@ pipeline {
         IMAGE_NAME = 'vijayjeyam/prodmexaanalysis'
         IMAGE_TAG  = 'latest'
 
-        SERVER_USER = 'mani'
         SERVER_IP   = '122.165.70.116'
-
         SERVER_PATH = '/home/mani/user-analysis-service'
-
-        SSH_KEY = 'C:\\Users\\hrhow\\.ssh\\id_ed25519'
     }
 
     triggers {
@@ -36,7 +32,7 @@ pipeline {
             steps {
                 bat '''
                 echo ========================================
-                echo            COMMIT DETAILS
+                echo             COMMIT DETAILS
                 echo ========================================
 
                 git log -1 --pretty=format:"Author: %%an"
@@ -63,7 +59,7 @@ pipeline {
             steps {
                 bat '''
                 echo ========================================
-                echo           RUNNING UNIT TESTS
+                echo            RUN UNIT TESTS
                 echo ========================================
 
                 mvn test -Dmaven.test.failure.ignore=true
@@ -80,11 +76,10 @@ pipeline {
                         testResults: 'target/surefire-reports/*.xml'
                     )
 
-                    def total = result.totalCount
-                    def failed = result.failCount
+                    def total   = result.totalCount
+                    def failed  = result.failCount
                     def skipped = result.skipCount
-
-                    def passed = total - failed - skipped
+                    def passed  = total - failed - skipped
 
                     def percentage = total > 0
                         ? (passed * 100.0 / total)
@@ -93,20 +88,20 @@ pipeline {
                     echo '========================================'
                     echo '              TEST SUMMARY'
                     echo '========================================'
-
                     echo "Total Tests  : ${total}"
                     echo "Passed       : ${passed}"
                     echo "Failed       : ${failed}"
                     echo "Skipped      : ${skipped}"
                     echo "Pass Percent : ${String.format('%.2f', percentage)}%"
-
                     echo '========================================'
 
-                    if (percentage < 80) {
+                    currentBuild.description =
+                        "Tests: ${passed}/${total} | ${String.format('%.2f', percentage)}%"
 
+                    if (percentage < 80) {
                         error(
-                            "TEST QUALITY GATE FAILED. " +
-                            "Only ${String.format('%.2f', percentage)}% tests passed. " +
+                            "TEST QUALITY GATE FAILED - " +
+                            "${String.format('%.2f', percentage)}% passed. " +
                             "Minimum required is 80%."
                         )
                     }
@@ -121,10 +116,10 @@ pipeline {
             steps {
                 bat '''
                 echo ========================================
-                echo             MAVEN BUILD
+                echo              MAVEN BUILD
                 echo ========================================
 
-                mvn clean package -DskipTests
+                mvn package -DskipTests
                 '''
             }
         }
@@ -133,13 +128,19 @@ pipeline {
             steps {
                 bat '''
                 echo ========================================
-                echo            DOCKER BUILD
+                echo              DOCKER BUILD
                 echo ========================================
 
                 "%DOCKER_EXE%" build ^
                 -t %IMAGE_NAME%:%BUILD_NUMBER% ^
                 -t %IMAGE_NAME%:%IMAGE_TAG% ^
                 .
+
+                echo ========================================
+                echo DOCKER IMAGE CREATED
+                echo %IMAGE_NAME%:%BUILD_NUMBER%
+                echo %IMAGE_NAME%:%IMAGE_TAG%
+                echo ========================================
                 '''
             }
         }
@@ -148,7 +149,7 @@ pipeline {
             steps {
                 bat '''
                 echo ========================================
-                echo             DOCKER SAVE
+                echo              DOCKER SAVE
                 echo ========================================
 
                 if exist app-image.tar (
@@ -160,113 +161,193 @@ pipeline {
                 %IMAGE_NAME%:%IMAGE_TAG%
 
                 dir app-image.tar
+
+                echo ========================================
+                echo DOCKER IMAGE SAVED AS app-image.tar
+                echo ========================================
                 '''
             }
         }
 
         stage('Check SSH Connection') {
             steps {
-                bat '''
-                echo ========================================
-                echo          CHECK SSH CONNECTION
-                echo ========================================
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'analysis-server-ssh-key',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    bat '''
+                    echo ========================================
+                    echo          CHECK SSH CONNECTION
+                    echo ========================================
 
-                ssh ^
-                -o BatchMode=yes ^
-                -o StrictHostKeyChecking=no ^
-                -i "%SSH_KEY%" ^
-                %SERVER_USER%@%SERVER_IP% ^
-                "echo SSH CONNECTION SUCCESS"
-                '''
+                    ssh ^
+                    -o BatchMode=yes ^
+                    -o StrictHostKeyChecking=no ^
+                    -i "%SSH_KEY_FILE%" ^
+                    %SSH_USER%@%SERVER_IP% ^
+                    "echo SSH CONNECTION SUCCESS"
+                    '''
+                }
             }
         }
 
         stage('Transfer Docker Image') {
             steps {
-                bat '''
-                echo ========================================
-                echo       TRANSFER IMAGE TO SERVER
-                echo ========================================
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'analysis-server-ssh-key',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    bat '''
+                    echo ========================================
+                    echo        TRANSFER DOCKER IMAGE
+                    echo ========================================
 
-                scp ^
-                -o BatchMode=yes ^
-                -o StrictHostKeyChecking=no ^
-                -i "%SSH_KEY%" ^
-                app-image.tar ^
-                %SERVER_USER%@%SERVER_IP%:%SERVER_PATH%/app-image.tar
+                    scp ^
+                    -o BatchMode=yes ^
+                    -o StrictHostKeyChecking=no ^
+                    -i "%SSH_KEY_FILE%" ^
+                    app-image.tar ^
+                    %SSH_USER%@%SERVER_IP%:%SERVER_PATH%/app-image.tar
 
-                echo IMAGE TRANSFER COMPLETED
-                '''
+                    echo ========================================
+                    echo IMAGE TRANSFER COMPLETED
+                    echo ========================================
+                    '''
+                }
             }
         }
 
         stage('Docker Load On Server') {
             steps {
-                bat '''
-                echo ========================================
-                echo        LOAD IMAGE ON SERVER
-                echo ========================================
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'analysis-server-ssh-key',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    bat '''
+                    echo ========================================
+                    echo         DOCKER LOAD ON SERVER
+                    echo ========================================
 
-                ssh ^
-                -o BatchMode=yes ^
-                -o StrictHostKeyChecking=no ^
-                -i "%SSH_KEY%" ^
-                %SERVER_USER%@%SERVER_IP% ^
-                "cd %SERVER_PATH% && docker load -i app-image.tar"
-                '''
+                    ssh ^
+                    -o BatchMode=yes ^
+                    -o StrictHostKeyChecking=no ^
+                    -i "%SSH_KEY_FILE%" ^
+                    %SSH_USER%@%SERVER_IP% ^
+                    "cd %SERVER_PATH% && docker load -i app-image.tar"
+                    '''
+                }
             }
         }
 
         stage('Check Docker Network') {
             steps {
-                bat '''
-                echo ========================================
-                echo          CHECK DOCKER NETWORK
-                echo ========================================
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'analysis-server-ssh-key',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    bat '''
+                    echo ========================================
+                    echo          CHECK DOCKER NETWORK
+                    echo ========================================
 
-                ssh ^
-                -o BatchMode=yes ^
-                -o StrictHostKeyChecking=no ^
-                -i "%SSH_KEY%" ^
-                %SERVER_USER%@%SERVER_IP% ^
-                "docker network inspect prodmexa >/dev/null 2>&1 || docker network create prodmexa"
-                '''
+                    ssh ^
+                    -o BatchMode=yes ^
+                    -o StrictHostKeyChecking=no ^
+                    -i "%SSH_KEY_FILE%" ^
+                    %SSH_USER%@%SERVER_IP% ^
+                    "docker network inspect prodmexa >/dev/null 2>&1 || docker network create prodmexa"
+                    '''
+                }
             }
         }
 
         stage('Docker Compose Deploy') {
             steps {
-                bat '''
-                echo ========================================
-                echo          DOCKER COMPOSE DEPLOY
-                echo ========================================
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'analysis-server-ssh-key',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    bat '''
+                    echo ========================================
+                    echo          DOCKER COMPOSE DEPLOY
+                    echo ========================================
 
-                ssh ^
-                -o BatchMode=yes ^
-                -o StrictHostKeyChecking=no ^
-                -i "%SSH_KEY%" ^
-                %SERVER_USER%@%SERVER_IP% ^
-                "cd %SERVER_PATH% && docker compose -f docker_env/prod.yml up -d"
-                '''
+                    ssh ^
+                    -o BatchMode=yes ^
+                    -o StrictHostKeyChecking=no ^
+                    -i "%SSH_KEY_FILE%" ^
+                    %SSH_USER%@%SERVER_IP% ^
+                    "cd %SERVER_PATH% && docker compose -f docker_env/prod.yml up -d --force-recreate"
+                    '''
+                }
             }
         }
 
         stage('Verify Container') {
             steps {
-                bat '''
-                echo ========================================
-                echo          VERIFY CONTAINER
-                echo ========================================
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'analysis-server-ssh-key',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+                    bat '''
+                    echo ========================================
+                    echo           VERIFY CONTAINER
+                    echo ========================================
 
-                ssh ^
-                -o BatchMode=yes ^
-                -o StrictHostKeyChecking=no ^
-                -i "%SSH_KEY%" ^
-                %SERVER_USER%@%SERVER_IP% ^
-                "docker ps --filter name=prodmexaanalysis"
+                    ssh ^
+                    -o BatchMode=yes ^
+                    -o StrictHostKeyChecking=no ^
+                    -i "%SSH_KEY_FILE%" ^
+                    %SSH_USER%@%SERVER_IP% ^
+                    "docker ps --filter name=prodmexaanalysis"
 
-                echo ========================================
-                '''
+                    echo ========================================
+                    '''
+                }
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'analysis-server-ssh-key',
+                        keyFileVariable: 'SSH_KEY_FILE',
+                        usernameVariable: 'SSH_USER'
+                    )
+                ]) {
+
+                    bat '''
+                    echo ========================================
+                    echo             HEALTH CHECK
+                    echo ========================================
+
+                    ssh ^
+                    -o BatchMode=yes ^
+                    -o StrictHostKeyChecking=no ^
+                    -i "%SSH_KEY_FILE%" ^
+                    %SSH_USER%@%SERVER_IP% ^
+                    "for i in 1 2 3 4 5 6; do RESPONSE=$(curl -s http://localhost:9035/actuator/health); echo $RESPONSE; echo $RESPONSE | grep -q \\"UP\\" && exit 0; sleep 5; done; echo APPLICATION HEALTH CHECK FAILED; docker logs --tail 50 prodmexaanalysis; exit 1"
+                    '''
+                }
             }
         }
     }
@@ -274,34 +355,35 @@ pipeline {
     post {
 
         success {
-
             echo '============================================'
-            echo '          CI/CD PIPELINE SUCCESS'
+            echo '            CI/CD PIPELINE SUCCESS'
             echo '============================================'
-            echo 'Tests >= 80%        : PASSED'
+            echo 'Unit Tests          : COMPLETED'
+            echo '80 Percent Gate     : PASSED'
             echo 'Maven Build         : SUCCESS'
             echo 'Docker Build        : SUCCESS'
             echo 'Docker Save         : SUCCESS'
+            echo 'SSH Connection      : SUCCESS'
             echo 'Server Transfer     : SUCCESS'
             echo 'Docker Load         : SUCCESS'
             echo 'Docker Compose      : SUCCESS'
-            echo 'Container Deployment: SUCCESS'
+            echo 'Container           : RUNNING'
+            echo 'Application Health  : UP'
             echo '============================================'
         }
 
         failure {
-
             echo '============================================'
-            echo '           CI/CD PIPELINE FAILED'
+            echo '             CI/CD PIPELINE FAILED'
             echo '============================================'
-            echo 'Check the failed Jenkins stage.'
-            echo 'If tests are below 80%, deployment is stopped.'
-            echo 'If deployment fails, check SSH/Docker logs.'
+            echo 'Check the failed stage above.'
+            echo 'If tests are below 80%, deployment stops.'
+            echo 'If SSH fails, check Jenkins SSH credential.'
+            echo 'If deployment fails, check Docker logs.'
             echo '============================================'
         }
 
         always {
-
             archiveArtifacts(
                 artifacts: 'target/surefire-reports/**',
                 allowEmptyArchive: true
