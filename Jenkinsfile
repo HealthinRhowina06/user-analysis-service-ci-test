@@ -19,17 +19,19 @@ pipeline {
 
         SSH_KEY = 'C:\\Windows\\System32\\config\\systemprofile\\.ssh\\id_ed25519'
 
+        HISTORY_FILE = 'ci-history.csv'
+
         COMMIT_AUTHOR  = ''
         COMMIT_EMAIL   = ''
         COMMIT_ID      = ''
         COMMIT_MESSAGE = ''
         COMMIT_DATE    = ''
 
-        TEST_TOTAL     = '0'
-        TEST_PASSED    = '0'
-        TEST_FAILED    = '0'
-        TEST_SKIPPED   = '0'
-        TEST_PERCENT   = '0.00'
+        TEST_TOTAL   = '0'
+        TEST_PASSED  = '0'
+        TEST_FAILED  = '0'
+        TEST_SKIPPED = '0'
+        TEST_PERCENT = '0.00'
     }
 
     triggers {
@@ -38,19 +40,11 @@ pipeline {
 
     stages {
 
-        // =====================================================
-        // 1. CHECKOUT
-        // =====================================================
-
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
-
-        // =====================================================
-        // 2. COMMIT DETAILS
-        // =====================================================
 
         stage('Commit Details') {
             steps {
@@ -99,10 +93,6 @@ pipeline {
             }
         }
 
-        // =====================================================
-        // 3. RUN TESTS
-        // =====================================================
-
         stage('Run Unit Tests') {
             steps {
                 bat '''
@@ -114,10 +104,6 @@ pipeline {
                 '''
             }
         }
-
-        // =====================================================
-        // 4. 80% QUALITY GATE
-        // =====================================================
 
         stage('80 Percent Test Gate') {
             steps {
@@ -146,10 +132,10 @@ pipeline {
                     echo '========================================'
                     echo '              TEST SUMMARY'
                     echo '========================================'
-                    echo "Total Tests  : ${env.TEST_TOTAL}"
-                    echo "Passed       : ${env.TEST_PASSED}"
-                    echo "Failed       : ${env.TEST_FAILED}"
-                    echo "Skipped      : ${env.TEST_SKIPPED}"
+                    echo "Total Tests  : ${total}"
+                    echo "Passed       : ${passed}"
+                    echo "Failed       : ${failed}"
+                    echo "Skipped      : ${skipped}"
                     echo "Pass Percent : ${env.TEST_PERCENT}%"
                     echo '========================================'
 
@@ -157,16 +143,6 @@ pipeline {
                         "Tests: ${passed}/${total} | ${env.TEST_PERCENT}%"
 
                     if (percentage < 80) {
-
-                        echo '========================================'
-                        echo '        TEST QUALITY GATE FAILED'
-                        echo '========================================'
-                        echo "Required : 80%"
-                        echo "Actual   : ${env.TEST_PERCENT}%"
-                        echo 'DEV BRANCH WILL NOT BE UPDATED'
-                        echo 'DEPLOYMENT WILL NOT START'
-                        echo '========================================'
-
                         error(
                             "TEST QUALITY GATE FAILED - " +
                             "${env.TEST_PERCENT}% passed. " +
@@ -174,61 +150,11 @@ pipeline {
                         )
                     }
 
-                    echo '========================================'
-                    echo '        TEST QUALITY GATE PASSED'
-                    echo '========================================'
-                    echo "Pass Percentage : ${env.TEST_PERCENT}%"
-                    echo 'Code can now be saved to DEV.'
-                    echo '========================================'
+                    echo 'TEST QUALITY GATE PASSED'
+                    echo 'PASS PERCENTAGE IS 80% OR ABOVE'
                 }
             }
         }
-
-        // =====================================================
-        // 5. SAVE ONLY PASSED CODE TO DEV
-        // =====================================================
-
-        stage('Save Passed Code To Dev') {
-            steps {
-
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'token',
-                        usernameVariable: 'GIT_USER',
-                        passwordVariable: 'GIT_TOKEN'
-                    )
-                ]) {
-
-                    bat '''
-                    echo ========================================
-                    echo        SAVE PASSED CODE TO DEV
-                    echo ========================================
-
-                    echo Fetching current DEV branch...
-
-                    git fetch ^
-                    https://%GIT_USER%:%GIT_TOKEN%@github.com/HealthinRhowina06/user-analysis-service-ci-test.git ^
-                    dev
-
-                    echo.
-                    echo Pushing tested commit to DEV...
-
-                    git push ^
-                    https://%GIT_USER%:%GIT_TOKEN%@github.com/HealthinRhowina06/user-analysis-service-ci-test.git ^
-                    HEAD:dev
-
-                    echo.
-                    echo ========================================
-                    echo PASSED CODE SAVED TO DEV SUCCESSFULLY
-                    echo ========================================
-                    '''
-                }
-            }
-        }
-
-        // =====================================================
-        // 6. MAVEN BUILD
-        // =====================================================
 
         stage('Maven Build') {
             steps {
@@ -241,10 +167,6 @@ pipeline {
                 '''
             }
         }
-
-        // =====================================================
-        // 7. DOCKER BUILD
-        // =====================================================
 
         stage('Docker Build') {
             steps {
@@ -266,10 +188,6 @@ pipeline {
                 '''
             }
         }
-
-        // =====================================================
-        // 8. DOCKER SAVE
-        // =====================================================
 
         stage('Docker Save') {
             steps {
@@ -295,10 +213,6 @@ pipeline {
             }
         }
 
-        // =====================================================
-        // 9. SSH CONNECTION
-        // =====================================================
-
         stage('Check SSH Connection') {
             steps {
                 bat '''
@@ -317,10 +231,6 @@ pipeline {
                 '''
             }
         }
-
-        // =====================================================
-        // 10. TRANSFER IMAGE
-        // =====================================================
 
         stage('Transfer Docker Image') {
             steps {
@@ -343,10 +253,6 @@ pipeline {
             }
         }
 
-        // =====================================================
-        // 11. DOCKER LOAD SERVER
-        // =====================================================
-
         stage('Docker Load On Server') {
             steps {
                 bat '''
@@ -367,10 +273,6 @@ pipeline {
                 '''
             }
         }
-
-        // =====================================================
-        // 12. CHECK NETWORK
-        // =====================================================
 
         stage('Check Docker Network') {
             steps {
@@ -393,10 +295,6 @@ pipeline {
             }
         }
 
-        // =====================================================
-        // 13. DEPLOY
-        // =====================================================
-
         stage('Docker Compose Deploy') {
             steps {
                 bat '''
@@ -418,10 +316,6 @@ pipeline {
             }
         }
 
-        // =====================================================
-        // 14. VERIFY CONTAINER
-        // =====================================================
-
         stage('Verify Container') {
             steps {
                 bat '''
@@ -440,10 +334,6 @@ pipeline {
                 '''
             }
         }
-
-        // =====================================================
-        // 15. HEALTH CHECK
-        // =====================================================
 
         stage('Health Check') {
             steps {
@@ -467,20 +357,14 @@ pipeline {
         }
     }
 
-    // =========================================================
-    // POST ACTIONS
-    // =========================================================
-
     post {
 
         success {
-
             echo '============================================'
             echo '            CI/CD PIPELINE SUCCESS'
             echo '============================================'
             echo 'Unit Tests          : COMPLETED'
             echo '80 Percent Gate     : PASSED'
-            echo 'Code Saved To Dev   : SUCCESS'
             echo 'Maven Build         : SUCCESS'
             echo 'Docker Build        : SUCCESS'
             echo 'Docker Save         : SUCCESS'
@@ -495,20 +379,14 @@ pipeline {
         }
 
         failure {
-
             echo '============================================'
             echo '             CI/CD PIPELINE FAILED'
             echo '============================================'
-            echo "Author       : ${env.COMMIT_AUTHOR}"
-            echo "Email        : ${env.COMMIT_EMAIL}"
-            echo "Commit       : ${env.COMMIT_ID}"
-            echo "Test Percent : ${env.TEST_PERCENT}%"
-            echo ''
             echo 'Check the failed stage above.'
-            echo 'If tests are below 80%, DEV is NOT updated.'
             echo 'If tests are below 80%, deployment stops.'
             echo 'If SSH fails, check Jenkins SYSTEM SSH key.'
             echo 'If deployment fails, check Docker logs.'
+            echo 'If health check fails, deployment is marked failed.'
             echo '============================================'
         }
 
@@ -523,11 +401,6 @@ pipeline {
                     finalResult == 'SUCCESS'
                         ? 'DEPLOYED'
                         : 'NOT DEPLOYED / FAILED'
-
-                def devSaveResult =
-                    finalResult == 'SUCCESS'
-                        ? 'SAVED TO DEV'
-                        : 'NOT SAVED / PIPELINE FAILED'
 
                 def branchName =
                     env.BRANCH_NAME ?: 'feature/ci-test'
@@ -560,7 +433,6 @@ pipeline {
                     '"Failed",' +
                     '"Skipped",' +
                     '"Pass Percentage",' +
-                    '"Dev Save Result",' +
                     '"Pipeline Result",' +
                     '"Deployment Result",' +
                     '"Build URL"'
@@ -579,7 +451,6 @@ pipeline {
                     "\"${env.TEST_FAILED ?: '0'}\"," +
                     "\"${env.TEST_SKIPPED ?: '0'}\"," +
                     "\"${env.TEST_PERCENT ?: '0.00'}%\"," +
-                    "\"${devSaveResult}\"," +
                     "\"${finalResult}\"," +
                     "\"${deploymentResult}\"," +
                     "\"${env.BUILD_URL ?: ''}\""
@@ -600,7 +471,6 @@ pipeline {
                 echo '              CI HISTORY RECORD'
                 echo '============================================'
                 echo "Build No     : ${env.BUILD_NUMBER}"
-                echo "Date         : ${new Date().format('yyyy-MM-dd HH:mm:ss')}"
                 echo "Author       : ${env.COMMIT_AUTHOR}"
                 echo "Email        : ${env.COMMIT_EMAIL}"
                 echo "Commit ID    : ${env.COMMIT_ID}"
@@ -611,8 +481,7 @@ pipeline {
                 echo "Failed       : ${env.TEST_FAILED}"
                 echo "Skipped      : ${env.TEST_SKIPPED}"
                 echo "Pass Rate    : ${env.TEST_PERCENT}%"
-                echo "Dev Result   : ${devSaveResult}"
-                echo "Pipeline     : ${finalResult}"
+                echo "Result       : ${finalResult}"
                 echo "Deployment   : ${deploymentResult}"
                 echo '============================================'
             }
