@@ -169,9 +169,14 @@ Write-Host "========================================"
                 '''
 
                 script {
-                    def total = readFile('.ci_test_total.txt').trim()
-                    def passed = readFile('.ci_test_passed.txt').trim()
-                    def percentage = readFile('.ci_test_percent.txt').trim()
+                    def total =
+                        readFile('.ci_test_total.txt').trim()
+
+                    def passed =
+                        readFile('.ci_test_passed.txt').trim()
+
+                    def percentage =
+                        readFile('.ci_test_percent.txt').trim()
 
                     currentBuild.description =
                         "Tests: ${passed}/${total} | ${percentage}%"
@@ -225,9 +230,11 @@ Write-Host "========================================"
                     exit /b 0
                 )
 
+                echo ========================================
                 echo TEST QUALITY GATE FAILED
                 echo TEST RESULT IS BELOW 80 PERCENT
                 echo DEPLOYMENT STOPPED
+                echo ========================================
 
                 exit /b 1
                 '''
@@ -258,7 +265,11 @@ Write-Host "========================================"
                 -t %IMAGE_NAME%:%IMAGE_TAG% ^
                 .
 
+                echo ========================================
                 echo DOCKER IMAGE CREATED
+                echo %IMAGE_NAME%:%BUILD_NUMBER%
+                echo %IMAGE_NAME%:%IMAGE_TAG%
+                echo ========================================
                 '''
             }
         }
@@ -280,7 +291,9 @@ Write-Host "========================================"
 
                 dir app-image.tar
 
+                echo ========================================
                 echo DOCKER IMAGE SAVED
+                echo ========================================
                 '''
             }
         }
@@ -298,6 +311,8 @@ Write-Host "========================================"
                 -i "%SSH_KEY%" ^
                 %SERVER_USER%@%SERVER_IP% ^
                 "echo SSH CONNECTION SUCCESS"
+
+                echo ========================================
                 '''
             }
         }
@@ -316,7 +331,9 @@ Write-Host "========================================"
                 app-image.tar ^
                 %SERVER_USER%@%SERVER_IP%:%SERVER_PATH%/app-image.tar
 
+                echo ========================================
                 echo IMAGE TRANSFER COMPLETED
+                echo ========================================
                 '''
             }
         }
@@ -335,7 +352,9 @@ Write-Host "========================================"
                 %SERVER_USER%@%SERVER_IP% ^
                 "cd %SERVER_PATH% && docker load -i app-image.tar"
 
+                echo ========================================
                 echo DOCKER IMAGE LOADED
+                echo ========================================
                 '''
             }
         }
@@ -354,7 +373,9 @@ Write-Host "========================================"
                 %SERVER_USER%@%SERVER_IP% ^
                 "docker network inspect prodmexa >/dev/null 2>&1 || docker network create prodmexa"
 
+                echo ========================================
                 echo DOCKER NETWORK READY
+                echo ========================================
                 '''
             }
         }
@@ -373,7 +394,11 @@ Write-Host "========================================"
                 %SERVER_USER%@%SERVER_IP% ^
                 "cd %SERVER_PATH% && docker compose -f docker_env/prod.yml up -d --force-recreate"
 
+                echo DEPLOYED > .ci_deploy.txt
+
+                echo ========================================
                 echo DOCKER COMPOSE DEPLOY COMPLETED
+                echo ========================================
                 '''
             }
         }
@@ -391,6 +416,8 @@ Write-Host "========================================"
                 -i "%SSH_KEY%" ^
                 %SERVER_USER%@%SERVER_IP% ^
                 "docker ps --filter name=prodmexaanalysis"
+
+                echo ========================================
                 '''
             }
         }
@@ -409,7 +436,11 @@ Write-Host "========================================"
                 %SERVER_USER%@%SERVER_IP% ^
                 "for i in 1 2 3 4 5 6; do RESPONSE=$(curl -s http://localhost:9035/actuator/health); echo $RESPONSE; echo $RESPONSE | grep -q \\"UP\\" && exit 0; sleep 5; done; echo APPLICATION HEALTH CHECK FAILED; docker logs --tail 50 prodmexaanalysis; exit 1"
 
+                echo UP > .ci_health.txt
+
+                echo ========================================
                 echo APPLICATION HEALTH CHECK PASSED
+                echo ========================================
                 '''
             }
         }
@@ -427,16 +458,28 @@ Write-Host "========================================"
             }
 
             writeFile(
-                file: 'generate-ci-history.ps1',
+                file: 'generate-ci-report.ps1',
                 text: '''
 $ErrorActionPreference = "Continue"
 
 function ReadValue($path, $default) {
+
     if (Test-Path $path) {
         return (Get-Content $path -Raw).Trim()
     }
 
     return $default
+}
+
+function HtmlEncode($value) {
+
+    if ($null -eq $value) {
+        return ""
+    }
+
+    return [System.Net.WebUtility]::HtmlEncode(
+        [string]$value
+    )
 }
 
 $author = ReadValue ".ci_author.txt" "UNKNOWN"
@@ -453,84 +496,388 @@ $percentage = ReadValue ".ci_test_percent.txt" "0"
 $gate = ReadValue ".ci_test_gate.txt" "UNKNOWN"
 
 $result = ReadValue ".ci_pipeline_result.txt" "UNKNOWN"
+$deployment = ReadValue ".ci_deploy.txt" "NOT DEPLOYED"
+$health = ReadValue ".ci_health.txt" "NOT CHECKED"
+
+$buildNumber = $env:BUILD_NUMBER
+$buildUrl = $env:BUILD_URL
+
+$branch = "feature/ci-test"
+
+# =========================================================
+# TXT REPORT
+# =========================================================
+
+$txtFile = "ci-report-$buildNumber.txt"
+
+$txt = @"
+============================================================
+                     CI/CD BUILD REPORT
+============================================================
+
+BUILD DETAILS
+
+Build Number    : $buildNumber
+Branch          : $branch
+Build URL       : $buildUrl
+
+
+COMMIT DETAILS
+
+Commit Author   : $author
+Email           : $email
+Commit ID       : $commitId
+Commit Message  : $message
+Commit Date     : $commitDate
+
+
+TEST RESULTS
+
+Total Tests     : $total
+Passed          : $passed
+Failed          : $failed
+Skipped         : $skipped
+Pass Percentage : $percentage%
+Test Gate       : $gate
+
+
+DEPLOYMENT DETAILS
+
+Pipeline Result : $result
+Deployment      : $deployment
+Application     : $health
+
+
+============================================================
+"@
+
+Set-Content `
+    -Path $txtFile `
+    -Value $txt `
+    -Encoding UTF8
+
+
+# =========================================================
+# HTML REPORT
+# =========================================================
+
+$htmlFile = "ci-report-$buildNumber.html"
+
+$authorHtml = HtmlEncode $author
+$emailHtml = HtmlEncode $email
+$commitHtml = HtmlEncode $commitId
+$messageHtml = HtmlEncode $message
+$dateHtml = HtmlEncode $commitDate
+$resultHtml = HtmlEncode $result
+$deploymentHtml = HtmlEncode $deployment
+$healthHtml = HtmlEncode $health
+$gateHtml = HtmlEncode $gate
+$buildUrlHtml = HtmlEncode $buildUrl
 
 if ($result -eq "SUCCESS") {
-    $deployment = "DEPLOYED"
+    $resultClass = "success"
 }
 else {
-    $deployment = "NOT DEPLOYED / FAILED"
+    $resultClass = "failure"
 }
 
-function CsvSafe($value) {
-    return '"' + ($value -replace '"','""') + '"'
+if ($gate -eq "PASS") {
+    $gateClass = "success"
+}
+else {
+    $gateClass = "failure"
 }
 
-$header = @(
-    "Build Number",
-    "Branch",
-    "Commit Author",
-    "Email",
-    "Commit ID",
-    "Commit Message",
-    "Commit Date",
-    "Total Tests",
-    "Passed",
-    "Failed",
-    "Skipped",
-    "Pass Percentage",
-    "Test Gate",
-    "Pipeline Result",
-    "Deployment Result",
-    "Build URL"
-) -join ","
+if ($health -eq "UP") {
+    $healthClass = "success"
+}
+else {
+    $healthClass = "failure"
+}
 
-$row = @(
-    (CsvSafe $env:BUILD_NUMBER),
-    (CsvSafe "feature/ci-test"),
-    (CsvSafe $author),
-    (CsvSafe $email),
-    (CsvSafe $commitId),
-    (CsvSafe $message),
-    (CsvSafe $commitDate),
-    (CsvSafe $total),
-    (CsvSafe $passed),
-    (CsvSafe $failed),
-    (CsvSafe $skipped),
-    (CsvSafe "$percentage%"),
-    (CsvSafe $gate),
-    (CsvSafe $result),
-    (CsvSafe $deployment),
-    (CsvSafe $env:BUILD_URL)
-) -join ","
+$html = @"
+<!DOCTYPE html>
+<html>
+<head>
 
-$file = "ci-history-$($env:BUILD_NUMBER).csv"
+<meta charset="UTF-8">
 
-Set-Content $file $header
-Add-Content $file $row
+<title>CI/CD Build Report #$buildNumber</title>
+
+<style>
+
+body {
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f4f6f8;
+    margin: 0;
+    padding: 30px;
+}
+
+.container {
+    max-width: 900px;
+    margin: auto;
+    background: white;
+    padding: 30px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 5px;
+}
+
+.subtitle {
+    text-align: center;
+    color: #666;
+    margin-bottom: 30px;
+}
+
+.section {
+    margin-top: 25px;
+}
+
+.section h2 {
+    border-bottom: 1px solid #ddd;
+    padding-bottom: 8px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+td {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+td:first-child {
+    font-weight: bold;
+    width: 230px;
+}
+
+.success {
+    color: green;
+    font-weight: bold;
+}
+
+.failure {
+    color: red;
+    font-weight: bold;
+}
+
+.code {
+    font-family: Consolas, monospace;
+    word-break: break-all;
+}
+
+.footer {
+    margin-top: 30px;
+    text-align: center;
+    color: #777;
+    font-size: 13px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>CI/CD Build Report</h1>
+
+<div class="subtitle">
+Build #$buildNumber
+</div>
+
+
+<div class="section">
+
+<h2>Build Details</h2>
+
+<table>
+
+<tr>
+<td>Build Number</td>
+<td>$buildNumber</td>
+</tr>
+
+<tr>
+<td>Branch</td>
+<td>$branch</td>
+</tr>
+
+<tr>
+<td>Pipeline Result</td>
+<td class="$resultClass">$resultHtml</td>
+</tr>
+
+<tr>
+<td>Build URL</td>
+<td>
+<a href="$buildUrlHtml">$buildUrlHtml</a>
+</td>
+</tr>
+
+</table>
+
+</div>
+
+
+<div class="section">
+
+<h2>Commit Details</h2>
+
+<table>
+
+<tr>
+<td>Commit Author</td>
+<td>$authorHtml</td>
+</tr>
+
+<tr>
+<td>Email</td>
+<td>$emailHtml</td>
+</tr>
+
+<tr>
+<td>Commit ID</td>
+<td class="code">$commitHtml</td>
+</tr>
+
+<tr>
+<td>Commit Message</td>
+<td>$messageHtml</td>
+</tr>
+
+<tr>
+<td>Commit Date</td>
+<td>$dateHtml</td>
+</tr>
+
+</table>
+
+</div>
+
+
+<div class="section">
+
+<h2>Test Results</h2>
+
+<table>
+
+<tr>
+<td>Total Tests</td>
+<td>$total</td>
+</tr>
+
+<tr>
+<td>Passed</td>
+<td>$passed</td>
+</tr>
+
+<tr>
+<td>Failed</td>
+<td>$failed</td>
+</tr>
+
+<tr>
+<td>Skipped</td>
+<td>$skipped</td>
+</tr>
+
+<tr>
+<td>Pass Percentage</td>
+<td>$percentage%</td>
+</tr>
+
+<tr>
+<td>80% Quality Gate</td>
+<td class="$gateClass">$gateHtml</td>
+</tr>
+
+</table>
+
+</div>
+
+
+<div class="section">
+
+<h2>Deployment</h2>
+
+<table>
+
+<tr>
+<td>Deployment Status</td>
+<td>$deploymentHtml</td>
+</tr>
+
+<tr>
+<td>Application Health</td>
+<td class="$healthClass">$healthHtml</td>
+</tr>
+
+</table>
+
+</div>
+
+
+<div class="footer">
+Generated automatically by Jenkins
+</div>
+
+</div>
+
+</body>
+</html>
+"@
+
+Set-Content `
+    -Path $htmlFile `
+    -Value $html `
+    -Encoding UTF8
+
+
+# =========================================================
+# CONSOLE SUMMARY
+# =========================================================
 
 Write-Host ""
-Write-Host "============================================"
-Write-Host "              CI HISTORY RECORD"
-Write-Host "============================================"
+Write-Host "============================================================"
+Write-Host "                     CI/CD BUILD REPORT"
+Write-Host "============================================================"
 
-Write-Host "Build No      : $($env:BUILD_NUMBER)"
-Write-Host "Commit Author : $author"
-Write-Host "Email         : $email"
-Write-Host "Commit ID     : $commitId"
-Write-Host "Message       : $message"
-Write-Host "Commit Date   : $commitDate"
+Write-Host ""
+Write-Host "Build Number   : $buildNumber"
+Write-Host "Branch         : $branch"
 
-Write-Host "Total Tests   : $total"
-Write-Host "Passed        : $passed"
-Write-Host "Failed        : $failed"
-Write-Host "Skipped       : $skipped"
-Write-Host "Pass Rate     : $percentage%"
-Write-Host "Test Gate     : $gate"
+Write-Host ""
+Write-Host "Commit Author  : $author"
+Write-Host "Email          : $email"
+Write-Host "Commit ID      : $commitId"
+Write-Host "Message        : $message"
 
-Write-Host "Result        : $result"
-Write-Host "Deployment    : $deployment"
+Write-Host ""
+Write-Host "Total Tests    : $total"
+Write-Host "Passed         : $passed"
+Write-Host "Failed         : $failed"
+Write-Host "Skipped        : $skipped"
+Write-Host "Pass Rate      : $percentage%"
+Write-Host "Test Gate      : $gate"
 
-Write-Host "============================================"
+Write-Host ""
+Write-Host "Pipeline       : $result"
+Write-Host "Deployment     : $deployment"
+Write-Host "Health         : $health"
+
+Write-Host ""
+Write-Host "HTML Report    : $htmlFile"
+Write-Host "TXT Report     : $txtFile"
+
+Write-Host "============================================================"
 '''
             )
 
@@ -538,11 +885,11 @@ Write-Host "============================================"
             powershell.exe ^
             -NoProfile ^
             -ExecutionPolicy Bypass ^
-            -File generate-ci-history.ps1
+            -File generate-ci-report.ps1
             '''
 
             archiveArtifacts(
-                artifacts: 'target/surefire-reports/**,ci-history-*.csv',
+                artifacts: 'target/surefire-reports/**,ci-report-*.html,ci-report-*.txt',
                 allowEmptyArchive: true
             )
         }
@@ -563,6 +910,8 @@ Write-Host "============================================"
             echo 'Docker Compose      : SUCCESS'
             echo 'Container           : RUNNING'
             echo 'Application Health  : UP'
+            echo 'HTML Report         : GENERATED'
+            echo 'TXT Report          : GENERATED'
             echo '============================================'
         }
 
@@ -570,9 +919,10 @@ Write-Host "============================================"
             echo '============================================'
             echo '             CI/CD PIPELINE FAILED'
             echo '============================================'
+            echo 'Check the failed stage above.'
             echo 'If test percentage is below 80%,'
             echo 'Docker build and deployment will NOT run.'
-            echo 'Check the failed stage above.'
+            echo 'HTML/TXT failure report will still be saved.'
             echo '============================================'
         }
     }
