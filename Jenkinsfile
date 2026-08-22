@@ -29,7 +29,9 @@ pipeline {
         TEST_PASSED  = '0'
         TEST_FAILED  = '0'
         TEST_SKIPPED = '0'
-        TEST_PERCENT = '0'
+        TEST_PERCENT = '0.00'
+
+        TEST_GATE = 'UNKNOWN'
     }
 
     triggers {
@@ -46,32 +48,37 @@ pipeline {
 
         stage('Commit Details') {
             steps {
+
+                /*
+                 * Write Git details into files first.
+                 * This avoids the previous bat(returnStdout) -> null issue.
+                 */
+                bat '''
+                @echo off
+
+                git log -1 --format=%%an > .ci_author.txt
+                git log -1 --format=%%ae > .ci_email.txt
+                git rev-parse HEAD > .ci_commit.txt
+                git log -1 --format=%%s > .ci_message.txt
+                git log -1 --format=%%ad > .ci_date.txt
+                '''
+
                 script {
 
-                    env.COMMIT_ID = bat(
-                        script: '@git rev-parse HEAD',
-                        returnStdout: true
-                    ).trim()
+                    env.COMMIT_AUTHOR =
+                        readFile('.ci_author.txt').trim()
 
-                    env.COMMIT_AUTHOR = bat(
-                        script: '@git log -1 --format=%%an',
-                        returnStdout: true
-                    ).trim()
+                    env.COMMIT_EMAIL =
+                        readFile('.ci_email.txt').trim()
 
-                    env.COMMIT_EMAIL = bat(
-                        script: '@git log -1 --format=%%ae',
-                        returnStdout: true
-                    ).trim()
+                    env.COMMIT_ID =
+                        readFile('.ci_commit.txt').trim()
 
-                    env.COMMIT_MESSAGE = bat(
-                        script: '@git log -1 --format=%%s',
-                        returnStdout: true
-                    ).trim()
+                    env.COMMIT_MESSAGE =
+                        readFile('.ci_message.txt').trim()
 
-                    env.COMMIT_DATE = bat(
-                        script: '@git log -1 --format=%%ad',
-                        returnStdout: true
-                    ).trim()
+                    env.COMMIT_DATE =
+                        readFile('.ci_date.txt').trim()
 
                     echo '========================================'
                     echo '             COMMIT DETAILS'
@@ -88,6 +95,7 @@ pipeline {
 
         stage('Run Unit Tests') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo             RUN UNIT TESTS
@@ -98,48 +106,212 @@ pipeline {
             }
         }
 
-        stage('80 Percent Test Gate') {
+        stage('Calculate Test Results') {
             steps {
+
+                /*
+                 * Parse Maven Surefire XML directly.
+                 *
+                 * This fixes:
+                 * Tests: 0/0 | 0%
+                 *
+                 * We don't depend on junit() return counters anymore.
+                 */
+
+                writeFile(
+                    file: 'ci-test-summary.ps1',
+                    text: '''
+$ErrorActionPreference = "Stop"
+
+$reportPath = "target\\surefire-reports"
+
+if (-not (Test-Path $reportPath)) {
+    Write-Host "Surefire report directory not found."
+    exit 1
+}
+
+$files = Get-ChildItem `
+    -Path $reportPath `
+    -Filter "TEST-*.xml" `
+    -File
+
+if ($files.Count -eq 0) {
+    Write-Host "No Surefire XML test reports found."
+    exit 1
+}
+
+$total = 0
+$failures = 0
+$errors = 0
+$skipped = 0
+
+foreach ($file in $files) {
+
+    [xml]$xml = Get-Content $file.FullName
+
+    $suite = $xml.testsuite
+
+    $total += [int]$suite.tests
+    $failures += [int]$suite.failures
+    $errors += [int]$suite.errors
+    $skipped += [int]$suite.skipped
+}
+
+$failed = $failures + $errors
+$passed = $total - $failed - $skipped
+
+if ($total -gt 0) {
+
+    $percentage =
+        [math]::Round(
+            ($passed * 100.0) / $total,
+            2
+        )
+
+} else {
+
+    $percentage = 0
+}
+
+Set-Content `
+    -Path ".ci_test_total.txt" `
+    -Value $total
+
+Set-Content `
+    -Path ".ci_test_passed.txt" `
+    -Value $passed
+
+Set-Content `
+    -Path ".ci_test_failed.txt" `
+    -Value $failed
+
+Set-Content `
+    -Path ".ci_test_skipped.txt" `
+    -Value $skipped
+
+Set-Content `
+    -Path ".ci_test_percent.txt" `
+    -Value $percentage
+
+if ($percentage -ge 80) {
+
+    Set-Content `
+        -Path ".ci_test_gate.txt" `
+        -Value "PASS"
+
+} else {
+
+    Set-Content `
+        -Path ".ci_test_gate.txt" `
+        -Value "FAIL"
+}
+
+Write-Host "========================================"
+Write-Host "       POWERSHELL TEST CALCULATION"
+Write-Host "========================================"
+Write-Host "Total   : $total"
+Write-Host "Passed  : $passed"
+Write-Host "Failed  : $failed"
+Write-Host "Skipped : $skipped"
+Write-Host "Percent : $percentage%"
+Write-Host "========================================"
+'''
+                )
+
+                bat '''
+                powershell.exe ^
+                -NoProfile ^
+                -ExecutionPolicy Bypass ^
+                -File ci-test-summary.ps1
+                '''
+
                 script {
 
-                    def result = junit(
-                        allowEmptyResults: false,
-                        testResults: 'target/surefire-reports/*.xml'
-                    )
+                    env.TEST_TOTAL =
+                        readFile('.ci_test_total.txt').trim()
 
-                    def total   = result.totalCount as int
-                    def failed  = result.failCount as int
-                    def skipped = result.skipCount as int
-                    def passed  = total - failed - skipped
+                    env.TEST_PASSED =
+                        readFile('.ci_test_passed.txt').trim()
 
-                    def percentage = total > 0
-                        ? (passed * 100 / total)
-                        : 0
+                    env.TEST_FAILED =
+                        readFile('.ci_test_failed.txt').trim()
 
-                    env.TEST_TOTAL   = "${total}"
-                    env.TEST_PASSED  = "${passed}"
-                    env.TEST_FAILED  = "${failed}"
-                    env.TEST_SKIPPED = "${skipped}"
-                    env.TEST_PERCENT = "${percentage}"
+                    env.TEST_SKIPPED =
+                        readFile('.ci_test_skipped.txt').trim()
+
+                    env.TEST_PERCENT =
+                        readFile('.ci_test_percent.txt').trim()
+
+                    env.TEST_GATE =
+                        readFile('.ci_test_gate.txt').trim()
 
                     echo '========================================'
                     echo '              TEST SUMMARY'
                     echo '========================================'
+
                     echo "Total Tests  : ${env.TEST_TOTAL}"
                     echo "Passed       : ${env.TEST_PASSED}"
                     echo "Failed       : ${env.TEST_FAILED}"
                     echo "Skipped      : ${env.TEST_SKIPPED}"
                     echo "Pass Percent : ${env.TEST_PERCENT}%"
+
                     echo '========================================'
 
                     currentBuild.description =
                         "Tests: ${env.TEST_PASSED}/${env.TEST_TOTAL} | ${env.TEST_PERCENT}%"
+                }
+            }
+        }
 
-                    if (percentage < 80) {
+        stage('Publish Test Report') {
+            steps {
+
+                /*
+                 * junit is still used to show the test report
+                 * inside Jenkins.
+                 *
+                 * But we do NOT use its returned counts.
+                 */
+
+                junit(
+                    allowEmptyResults: false,
+                    testResults: 'target/surefire-reports/TEST-*.xml'
+                )
+            }
+        }
+
+        stage('80 Percent Test Gate') {
+            steps {
+
+                script {
+
+                    echo '========================================'
+                    echo '           80 PERCENT TEST GATE'
+                    echo '========================================'
+
+                    echo "Total Tests : ${env.TEST_TOTAL}"
+                    echo "Passed      : ${env.TEST_PASSED}"
+                    echo "Failed      : ${env.TEST_FAILED}"
+                    echo "Skipped     : ${env.TEST_SKIPPED}"
+                    echo "Pass Rate   : ${env.TEST_PERCENT}%"
+
+                    echo '========================================'
+
+                    if (env.TEST_GATE == 'FAIL') {
+
                         error(
                             "TEST QUALITY GATE FAILED - " +
                             "${env.TEST_PERCENT}% tests passed. " +
-                            "Minimum required is 80%."
+                            "Minimum required is 80%. " +
+                            "DEPLOYMENT STOPPED."
+                        )
+                    }
+
+                    if (env.TEST_GATE != 'PASS') {
+
+                        error(
+                            "TEST RESULT COULD NOT BE DETERMINED. " +
+                            "DEPLOYMENT STOPPED."
                         )
                     }
 
@@ -151,6 +323,7 @@ pipeline {
 
         stage('Maven Build') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo              MAVEN BUILD
@@ -163,6 +336,7 @@ pipeline {
 
         stage('Docker Build') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo              DOCKER BUILD
@@ -184,6 +358,7 @@ pipeline {
 
         stage('Docker Save') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo              DOCKER SAVE
@@ -208,6 +383,7 @@ pipeline {
 
         stage('Check SSH Connection') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo          CHECK SSH CONNECTION
@@ -227,6 +403,7 @@ pipeline {
 
         stage('Transfer Docker Image') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo         TRANSFER DOCKER IMAGE
@@ -248,6 +425,7 @@ pipeline {
 
         stage('Docker Load On Server') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo         DOCKER LOAD ON SERVER
@@ -269,6 +447,7 @@ pipeline {
 
         stage('Check Docker Network') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo          CHECK DOCKER NETWORK
@@ -290,6 +469,7 @@ pipeline {
 
         stage('Docker Compose Deploy') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo          DOCKER COMPOSE DEPLOY
@@ -311,6 +491,7 @@ pipeline {
 
         stage('Verify Container') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo            VERIFY CONTAINER
@@ -330,6 +511,7 @@ pipeline {
 
         stage('Health Check') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo              HEALTH CHECK
@@ -353,10 +535,16 @@ pipeline {
     post {
 
         success {
+
             echo '============================================'
             echo '            CI/CD PIPELINE SUCCESS'
             echo '============================================'
-            echo 'Unit Tests          : COMPLETED'
+
+            echo "Author              : ${env.COMMIT_AUTHOR}"
+            echo "Commit ID           : ${env.COMMIT_ID}"
+            echo "Tests               : ${env.TEST_PASSED}/${env.TEST_TOTAL}"
+            echo "Test Percentage     : ${env.TEST_PERCENT}%"
+
             echo '80 Percent Gate     : PASSED'
             echo 'Maven Build         : SUCCESS'
             echo 'Docker Build        : SUCCESS'
@@ -368,22 +556,30 @@ pipeline {
             echo 'Docker Compose      : SUCCESS'
             echo 'Container           : RUNNING'
             echo 'Application Health  : UP'
+
             echo '============================================'
         }
 
         failure {
+
             echo '============================================'
             echo '             CI/CD PIPELINE FAILED'
             echo '============================================'
-            echo 'Check the failed stage above.'
-            echo 'If tests are below 80%, deployment stops.'
-            echo 'If SSH fails, check Jenkins SYSTEM SSH key.'
-            echo 'If deployment fails, check Docker logs.'
-            echo 'If health check fails, deployment is marked failed.'
+
+            echo "Author          : ${env.COMMIT_AUTHOR}"
+            echo "Commit ID       : ${env.COMMIT_ID}"
+            echo "Tests           : ${env.TEST_PASSED}/${env.TEST_TOTAL}"
+            echo "Test Percentage : ${env.TEST_PERCENT}%"
+
+            echo ''
+            echo 'If tests are below 80%, deployment is stopped.'
+            echo 'Check the failed Jenkins stage.'
+
             echo '============================================'
         }
 
         always {
+
             script {
 
                 def finalResult =
@@ -429,13 +625,14 @@ pipeline {
                     '"Failed",' +
                     '"Skipped",' +
                     '"Pass Percentage",' +
+                    '"Test Gate",' +
                     '"Pipeline Result",' +
                     '"Deployment Result",' +
                     '"Build URL"'
 
                 def row =
                     "\"${env.BUILD_NUMBER}\"," +
-                    "\"${new Date().format('yyyy-MM-dd HH:mm:ss')}\"," +
+                    "\"${env.BUILD_ID ?: ''}\"," +
                     "\"${branchName}\"," +
                     "\"${safeAuthor}\"," +
                     "\"${safeEmail}\"," +
@@ -447,6 +644,7 @@ pipeline {
                     "\"${env.TEST_FAILED ?: '0'}\"," +
                     "\"${env.TEST_SKIPPED ?: '0'}\"," +
                     "\"${env.TEST_PERCENT ?: '0'}%\"," +
+                    "\"${env.TEST_GATE ?: 'UNKNOWN'}\"," +
                     "\"${finalResult}\"," +
                     "\"${deploymentResult}\"," +
                     "\"${env.BUILD_URL ?: ''}\""
@@ -462,19 +660,24 @@ pipeline {
                 echo '============================================'
                 echo '              CI HISTORY RECORD'
                 echo '============================================'
+
                 echo "Build No     : ${env.BUILD_NUMBER}"
                 echo "Author       : ${env.COMMIT_AUTHOR}"
                 echo "Email        : ${env.COMMIT_EMAIL}"
                 echo "Commit ID    : ${env.COMMIT_ID}"
                 echo "Message      : ${env.COMMIT_MESSAGE}"
                 echo "Branch       : ${branchName}"
+
                 echo "Total Tests  : ${env.TEST_TOTAL}"
                 echo "Passed       : ${env.TEST_PASSED}"
                 echo "Failed       : ${env.TEST_FAILED}"
                 echo "Skipped      : ${env.TEST_SKIPPED}"
                 echo "Pass Rate    : ${env.TEST_PERCENT}%"
+                echo "Test Gate    : ${env.TEST_GATE}"
+
                 echo "Result       : ${finalResult}"
                 echo "Deployment   : ${deploymentResult}"
+
                 echo '============================================'
             }
 
