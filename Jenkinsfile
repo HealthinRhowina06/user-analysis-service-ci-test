@@ -18,6 +18,18 @@ pipeline {
         SERVER_PATH = '/home/mani/user-analysis-service'
 
         SSH_KEY = 'C:\\Windows\\System32\\config\\systemprofile\\.ssh\\id_ed25519'
+
+        COMMIT_AUTHOR  = ''
+        COMMIT_EMAIL   = ''
+        COMMIT_ID      = ''
+        COMMIT_MESSAGE = ''
+        COMMIT_DATE    = ''
+
+        TEST_TOTAL     = '0'
+        TEST_PASSED    = '0'
+        TEST_FAILED    = '0'
+        TEST_SKIPPED   = '0'
+        TEST_PERCENT   = '0.00'
     }
 
     triggers {
@@ -26,38 +38,70 @@ pipeline {
 
     stages {
 
+        // =====================================================
+        // 1. CHECKOUT
+        // =====================================================
+
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
 
+        // =====================================================
+        // 2. COMMIT DETAILS
+        // =====================================================
+
         stage('Commit Details') {
             steps {
-                bat '''
-                echo ========================================
-                echo             COMMIT DETAILS
-                echo ========================================
+                script {
 
-                git log -1 --pretty=format:"Author: %%an"
-                echo.
+                    env.COMMIT_AUTHOR =
+                        bat(
+                            script: '@git log -1 --pretty=format:"%%an"',
+                            returnStdout: true
+                        ).trim()
 
-                git log -1 --pretty=format:"Email: %%ae"
-                echo.
+                    env.COMMIT_EMAIL =
+                        bat(
+                            script: '@git log -1 --pretty=format:"%%ae"',
+                            returnStdout: true
+                        ).trim()
 
-                git log -1 --pretty=format:"Commit ID: %%H"
-                echo.
+                    env.COMMIT_ID =
+                        bat(
+                            script: '@git log -1 --pretty=format:"%%H"',
+                            returnStdout: true
+                        ).trim()
 
-                git log -1 --pretty=format:"Message: %%s"
-                echo.
+                    env.COMMIT_MESSAGE =
+                        bat(
+                            script: '@git log -1 --pretty=format:"%%s"',
+                            returnStdout: true
+                        ).trim()
 
-                git log -1 --pretty=format:"Date: %%ad"
-                echo.
+                    env.COMMIT_DATE =
+                        bat(
+                            script: '@git log -1 --pretty=format:"%%ad"',
+                            returnStdout: true
+                        ).trim()
 
-                echo ========================================
-                '''
+                    echo '========================================'
+                    echo '             COMMIT DETAILS'
+                    echo '========================================'
+                    echo "Author      : ${env.COMMIT_AUTHOR}"
+                    echo "Email       : ${env.COMMIT_EMAIL}"
+                    echo "Commit ID   : ${env.COMMIT_ID}"
+                    echo "Message     : ${env.COMMIT_MESSAGE}"
+                    echo "Commit Date : ${env.COMMIT_DATE}"
+                    echo '========================================'
+                }
             }
         }
+
+        // =====================================================
+        // 3. RUN TESTS
+        // =====================================================
 
         stage('Run Unit Tests') {
             steps {
@@ -70,6 +114,10 @@ pipeline {
                 '''
             }
         }
+
+        // =====================================================
+        // 4. 80% QUALITY GATE
+        // =====================================================
 
         stage('80 Percent Test Gate') {
             steps {
@@ -89,35 +137,98 @@ pipeline {
                         ? (passed * 100.0 / total)
                         : 0
 
+                    env.TEST_TOTAL   = "${total}"
+                    env.TEST_PASSED  = "${passed}"
+                    env.TEST_FAILED  = "${failed}"
+                    env.TEST_SKIPPED = "${skipped}"
+                    env.TEST_PERCENT = String.format('%.2f', percentage)
+
                     echo '========================================'
                     echo '              TEST SUMMARY'
                     echo '========================================'
-
-                    echo "Total Tests  : ${total}"
-                    echo "Passed       : ${passed}"
-                    echo "Failed       : ${failed}"
-                    echo "Skipped      : ${skipped}"
-                    echo "Pass Percent : ${String.format('%.2f', percentage)}%"
-
+                    echo "Total Tests  : ${env.TEST_TOTAL}"
+                    echo "Passed       : ${env.TEST_PASSED}"
+                    echo "Failed       : ${env.TEST_FAILED}"
+                    echo "Skipped      : ${env.TEST_SKIPPED}"
+                    echo "Pass Percent : ${env.TEST_PERCENT}%"
                     echo '========================================'
 
                     currentBuild.description =
-                        "Tests: ${passed}/${total} | ${String.format('%.2f', percentage)}%"
+                        "Tests: ${passed}/${total} | ${env.TEST_PERCENT}%"
 
                     if (percentage < 80) {
 
+                        echo '========================================'
+                        echo '        TEST QUALITY GATE FAILED'
+                        echo '========================================'
+                        echo "Required : 80%"
+                        echo "Actual   : ${env.TEST_PERCENT}%"
+                        echo 'DEV BRANCH WILL NOT BE UPDATED'
+                        echo 'DEPLOYMENT WILL NOT START'
+                        echo '========================================'
+
                         error(
                             "TEST QUALITY GATE FAILED - " +
-                            "${String.format('%.2f', percentage)}% passed. " +
+                            "${env.TEST_PERCENT}% passed. " +
                             "Minimum required is 80%."
                         )
                     }
 
-                    echo 'TEST QUALITY GATE PASSED'
-                    echo 'PASS PERCENTAGE IS 80% OR ABOVE'
+                    echo '========================================'
+                    echo '        TEST QUALITY GATE PASSED'
+                    echo '========================================'
+                    echo "Pass Percentage : ${env.TEST_PERCENT}%"
+                    echo 'Code can now be saved to DEV.'
+                    echo '========================================'
                 }
             }
         }
+
+        // =====================================================
+        // 5. SAVE ONLY PASSED CODE TO DEV
+        // =====================================================
+
+        stage('Save Passed Code To Dev') {
+            steps {
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'token',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )
+                ]) {
+
+                    bat '''
+                    echo ========================================
+                    echo        SAVE PASSED CODE TO DEV
+                    echo ========================================
+
+                    echo Fetching current DEV branch...
+
+                    git fetch ^
+                    https://%GIT_USER%:%GIT_TOKEN%@github.com/HealthinRhowina06/user-analysis-service-ci-test.git ^
+                    dev
+
+                    echo.
+                    echo Pushing tested commit to DEV...
+
+                    git push ^
+                    https://%GIT_USER%:%GIT_TOKEN%@github.com/HealthinRhowina06/user-analysis-service-ci-test.git ^
+                    HEAD:dev
+
+                    echo.
+                    echo ========================================
+                    echo PASSED CODE SAVED TO DEV SUCCESSFULLY
+                    echo ========================================
+                    '''
+                }
+            }
+        }
+
+        // =====================================================
+        // 6. MAVEN BUILD
+        // =====================================================
 
         stage('Maven Build') {
             steps {
@@ -130,6 +241,10 @@ pipeline {
                 '''
             }
         }
+
+        // =====================================================
+        // 7. DOCKER BUILD
+        // =====================================================
 
         stage('Docker Build') {
             steps {
@@ -151,6 +266,10 @@ pipeline {
                 '''
             }
         }
+
+        // =====================================================
+        // 8. DOCKER SAVE
+        // =====================================================
 
         stage('Docker Save') {
             steps {
@@ -176,6 +295,10 @@ pipeline {
             }
         }
 
+        // =====================================================
+        // 9. SSH CONNECTION
+        // =====================================================
+
         stage('Check SSH Connection') {
             steps {
                 bat '''
@@ -194,6 +317,10 @@ pipeline {
                 '''
             }
         }
+
+        // =====================================================
+        // 10. TRANSFER IMAGE
+        // =====================================================
 
         stage('Transfer Docker Image') {
             steps {
@@ -216,6 +343,10 @@ pipeline {
             }
         }
 
+        // =====================================================
+        // 11. DOCKER LOAD SERVER
+        // =====================================================
+
         stage('Docker Load On Server') {
             steps {
                 bat '''
@@ -236,6 +367,10 @@ pipeline {
                 '''
             }
         }
+
+        // =====================================================
+        // 12. CHECK NETWORK
+        // =====================================================
 
         stage('Check Docker Network') {
             steps {
@@ -258,6 +393,10 @@ pipeline {
             }
         }
 
+        // =====================================================
+        // 13. DEPLOY
+        // =====================================================
+
         stage('Docker Compose Deploy') {
             steps {
                 bat '''
@@ -279,6 +418,10 @@ pipeline {
             }
         }
 
+        // =====================================================
+        // 14. VERIFY CONTAINER
+        // =====================================================
+
         stage('Verify Container') {
             steps {
                 bat '''
@@ -297,6 +440,10 @@ pipeline {
                 '''
             }
         }
+
+        // =====================================================
+        // 15. HEALTH CHECK
+        // =====================================================
 
         stage('Health Check') {
             steps {
@@ -320,6 +467,10 @@ pipeline {
         }
     }
 
+    // =========================================================
+    // POST ACTIONS
+    // =========================================================
+
     post {
 
         success {
@@ -329,6 +480,7 @@ pipeline {
             echo '============================================'
             echo 'Unit Tests          : COMPLETED'
             echo '80 Percent Gate     : PASSED'
+            echo 'Code Saved To Dev   : SUCCESS'
             echo 'Maven Build         : SUCCESS'
             echo 'Docker Build        : SUCCESS'
             echo 'Docker Save         : SUCCESS'
@@ -347,18 +499,126 @@ pipeline {
             echo '============================================'
             echo '             CI/CD PIPELINE FAILED'
             echo '============================================'
+            echo "Author       : ${env.COMMIT_AUTHOR}"
+            echo "Email        : ${env.COMMIT_EMAIL}"
+            echo "Commit       : ${env.COMMIT_ID}"
+            echo "Test Percent : ${env.TEST_PERCENT}%"
+            echo ''
             echo 'Check the failed stage above.'
+            echo 'If tests are below 80%, DEV is NOT updated.'
             echo 'If tests are below 80%, deployment stops.'
             echo 'If SSH fails, check Jenkins SYSTEM SSH key.'
             echo 'If deployment fails, check Docker logs.'
-            echo 'If health check fails, deployment is marked failed.'
             echo '============================================'
         }
 
         always {
 
+            script {
+
+                def finalResult =
+                    currentBuild.currentResult ?: 'UNKNOWN'
+
+                def deploymentResult =
+                    finalResult == 'SUCCESS'
+                        ? 'DEPLOYED'
+                        : 'NOT DEPLOYED / FAILED'
+
+                def devSaveResult =
+                    finalResult == 'SUCCESS'
+                        ? 'SAVED TO DEV'
+                        : 'NOT SAVED / PIPELINE FAILED'
+
+                def branchName =
+                    env.BRANCH_NAME ?: 'feature/ci-test'
+
+                def safeMessage =
+                    (env.COMMIT_MESSAGE ?: '')
+                        .replace('"', '""')
+                        .replace('\r', ' ')
+                        .replace('\n', ' ')
+
+                def safeAuthor =
+                    (env.COMMIT_AUTHOR ?: '')
+                        .replace('"', '""')
+
+                def safeEmail =
+                    (env.COMMIT_EMAIL ?: '')
+                        .replace('"', '""')
+
+                def header =
+                    '"Build Number",' +
+                    '"Date Time",' +
+                    '"Branch",' +
+                    '"Author",' +
+                    '"Email",' +
+                    '"Commit ID",' +
+                    '"Commit Message",' +
+                    '"Commit Date",' +
+                    '"Total Tests",' +
+                    '"Passed",' +
+                    '"Failed",' +
+                    '"Skipped",' +
+                    '"Pass Percentage",' +
+                    '"Dev Save Result",' +
+                    '"Pipeline Result",' +
+                    '"Deployment Result",' +
+                    '"Build URL"'
+
+                def row =
+                    "\"${env.BUILD_NUMBER}\"," +
+                    "\"${new Date().format('yyyy-MM-dd HH:mm:ss')}\"," +
+                    "\"${branchName}\"," +
+                    "\"${safeAuthor}\"," +
+                    "\"${safeEmail}\"," +
+                    "\"${env.COMMIT_ID ?: ''}\"," +
+                    "\"${safeMessage}\"," +
+                    "\"${env.COMMIT_DATE ?: ''}\"," +
+                    "\"${env.TEST_TOTAL ?: '0'}\"," +
+                    "\"${env.TEST_PASSED ?: '0'}\"," +
+                    "\"${env.TEST_FAILED ?: '0'}\"," +
+                    "\"${env.TEST_SKIPPED ?: '0'}\"," +
+                    "\"${env.TEST_PERCENT ?: '0.00'}%\"," +
+                    "\"${devSaveResult}\"," +
+                    "\"${finalResult}\"," +
+                    "\"${deploymentResult}\"," +
+                    "\"${env.BUILD_URL ?: ''}\""
+
+                def historyFile =
+                    "ci-history-${env.BUILD_NUMBER}.csv"
+
+                writeFile(
+                    file: historyFile,
+                    text:
+                        header +
+                        System.lineSeparator() +
+                        row +
+                        System.lineSeparator()
+                )
+
+                echo '============================================'
+                echo '              CI HISTORY RECORD'
+                echo '============================================'
+                echo "Build No     : ${env.BUILD_NUMBER}"
+                echo "Date         : ${new Date().format('yyyy-MM-dd HH:mm:ss')}"
+                echo "Author       : ${env.COMMIT_AUTHOR}"
+                echo "Email        : ${env.COMMIT_EMAIL}"
+                echo "Commit ID    : ${env.COMMIT_ID}"
+                echo "Message      : ${env.COMMIT_MESSAGE}"
+                echo "Branch       : ${branchName}"
+                echo "Total Tests  : ${env.TEST_TOTAL}"
+                echo "Passed       : ${env.TEST_PASSED}"
+                echo "Failed       : ${env.TEST_FAILED}"
+                echo "Skipped      : ${env.TEST_SKIPPED}"
+                echo "Pass Rate    : ${env.TEST_PERCENT}%"
+                echo "Dev Result   : ${devSaveResult}"
+                echo "Pipeline     : ${finalResult}"
+                echo "Deployment   : ${deploymentResult}"
+                echo '============================================'
+            }
+
             archiveArtifacts(
-                artifacts: 'target/surefire-reports/**',
+                artifacts: 'target/surefire-reports/**,ci-history-*.csv',
                 allowEmptyArchive: true
             )
         }
