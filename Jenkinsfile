@@ -19,17 +19,23 @@ pipeline {
 
         SSH_KEY = 'C:\\Windows\\System32\\config\\systemprofile\\.ssh\\id_ed25519'
 
+        SOURCE_BRANCH = 'feature/ci-test'
+
         COMMIT_AUTHOR  = ''
         COMMIT_EMAIL   = ''
         COMMIT_ID      = ''
         COMMIT_MESSAGE = ''
         COMMIT_DATE    = ''
+        BUILD_TIME     = ''
 
         TEST_TOTAL     = '0'
         TEST_PASSED    = '0'
         TEST_FAILED    = '0'
         TEST_SKIPPED   = '0'
         TEST_PERCENT   = '0.00'
+
+        DEV_SAVE_RESULT    = 'NOT SAVED'
+        DEPLOYMENT_RESULT  = 'NOT DEPLOYED'
     }
 
     triggers {
@@ -54,37 +60,36 @@ pipeline {
 
         stage('Commit Details') {
             steps {
+
+                bat '''
+                git log -1 --pretty=format:"%%an" > commit_author.txt
+                git log -1 --pretty=format:"%%ae" > commit_email.txt
+                git log -1 --pretty=format:"%%H"  > commit_id.txt
+                git log -1 --pretty=format:"%%s"  > commit_message.txt
+                git log -1 --date=iso --pretty=format:"%%ad" > commit_date.txt
+
+                powershell -NoProfile -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'" > build_time.txt
+                '''
+
                 script {
 
                     env.COMMIT_AUTHOR =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%an"',
-                            returnStdout: true
-                        ).trim()
+                        readFile('commit_author.txt').trim()
 
                     env.COMMIT_EMAIL =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%ae"',
-                            returnStdout: true
-                        ).trim()
+                        readFile('commit_email.txt').trim()
 
                     env.COMMIT_ID =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%H"',
-                            returnStdout: true
-                        ).trim()
+                        readFile('commit_id.txt').trim()
 
                     env.COMMIT_MESSAGE =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%s"',
-                            returnStdout: true
-                        ).trim()
+                        readFile('commit_message.txt').trim()
 
                     env.COMMIT_DATE =
-                        bat(
-                            script: '@git log -1 --pretty=format:"%%ad"',
-                            returnStdout: true
-                        ).trim()
+                        readFile('commit_date.txt').trim()
+
+                    env.BUILD_TIME =
+                        readFile('build_time.txt').trim()
 
                     echo '========================================'
                     echo '             COMMIT DETAILS'
@@ -94,17 +99,19 @@ pipeline {
                     echo "Commit ID   : ${env.COMMIT_ID}"
                     echo "Message     : ${env.COMMIT_MESSAGE}"
                     echo "Commit Date : ${env.COMMIT_DATE}"
+                    echo "Build Time  : ${env.BUILD_TIME}"
                     echo '========================================'
                 }
             }
         }
 
         // =====================================================
-        // 3. RUN TESTS
+        // 3. RUN UNIT TESTS
         // =====================================================
 
         stage('Run Unit Tests') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo             RUN UNIT TESTS
@@ -116,32 +123,78 @@ pipeline {
         }
 
         // =====================================================
-        // 4. 80% QUALITY GATE
+        // 4. READ TEST RESULT + 80% QUALITY GATE
         // =====================================================
 
         stage('80 Percent Test Gate') {
             steps {
+
+                // Publish test report in Jenkins
+                junit(
+                    allowEmptyResults: false,
+                    testResults: 'target/surefire-reports/*.xml'
+                )
+
+                // Read actual Maven Surefire XML values.
+                // This avoids the previous Jenkins 0/0 issue.
+                bat '''
+                powershell -NoProfile -Command ^
+                "$files = Get-ChildItem 'target\\surefire-reports\\TEST-*.xml'; ^
+                $total = 0; ^
+                $failures = 0; ^
+                $errors = 0; ^
+                $skipped = 0; ^
+                foreach ($f in $files) { ^
+                    [xml]$xml = Get-Content $f.FullName; ^
+                    $suite = $xml.testsuite; ^
+                    $total += [int]$suite.tests; ^
+                    $failures += [int]$suite.failures; ^
+                    $errors += [int]$suite.errors; ^
+                    $skipped += [int]$suite.skipped; ^
+                }; ^
+                $failedTotal = $failures + $errors; ^
+                Set-Content -Path 'test-summary.txt' -Value ($total.ToString() + ',' + $failedTotal.ToString() + ',' + $skipped.ToString())"
+                '''
+
                 script {
 
-                    def result = junit(
-                        allowEmptyResults: false,
-                        testResults: 'target/surefire-reports/*.xml'
-                    )
+                    def summary =
+                        readFile('test-summary.txt').trim()
 
-                    def total   = result.totalCount
-                    def failed  = result.failCount
-                    def skipped = result.skipCount
-                    def passed  = total - failed - skipped
+                    def parts =
+                        summary.split(',')
 
-                    def percentage = total > 0
-                        ? (passed * 100.0 / total)
-                        : 0
+                    def total =
+                        parts[0].trim().toInteger()
 
-                    env.TEST_TOTAL   = "${total}"
-                    env.TEST_PASSED  = "${passed}"
-                    env.TEST_FAILED  = "${failed}"
-                    env.TEST_SKIPPED = "${skipped}"
-                    env.TEST_PERCENT = String.format('%.2f', percentage)
+                    def failed =
+                        parts[1].trim().toInteger()
+
+                    def skipped =
+                        parts[2].trim().toInteger()
+
+                    def passed =
+                        total - failed - skipped
+
+                    def percentage =
+                        total > 0
+                            ? (passed * 100.0 / total)
+                            : 0.0
+
+                    env.TEST_TOTAL =
+                        total.toString()
+
+                    env.TEST_PASSED =
+                        passed.toString()
+
+                    env.TEST_FAILED =
+                        failed.toString()
+
+                    env.TEST_SKIPPED =
+                        skipped.toString()
+
+                    env.TEST_PERCENT =
+                        String.format('%.2f', percentage)
 
                     echo '========================================'
                     echo '              TEST SUMMARY'
@@ -156,12 +209,27 @@ pipeline {
                     currentBuild.description =
                         "Tests: ${passed}/${total} | ${env.TEST_PERCENT}%"
 
+                    // No tests itself is treated as failure.
+                    if (total == 0) {
+
+                        echo '========================================'
+                        echo '          NO TEST RESULTS FOUND'
+                        echo '========================================'
+                        echo 'DEV BRANCH WILL NOT BE UPDATED'
+                        echo 'DEPLOYMENT WILL NOT START'
+                        echo '========================================'
+
+                        error(
+                            'QUALITY GATE FAILED - No tests were found.'
+                        )
+                    }
+
                     if (percentage < 80) {
 
                         echo '========================================'
                         echo '        TEST QUALITY GATE FAILED'
                         echo '========================================'
-                        echo "Required : 80%"
+                        echo 'Required : 80%'
                         echo "Actual   : ${env.TEST_PERCENT}%"
                         echo 'DEV BRANCH WILL NOT BE UPDATED'
                         echo 'DEPLOYMENT WILL NOT START'
@@ -223,6 +291,10 @@ pipeline {
                     echo ========================================
                     '''
                 }
+
+                script {
+                    env.DEV_SAVE_RESULT = 'SAVED TO DEV'
+                }
             }
         }
 
@@ -232,6 +304,7 @@ pipeline {
 
         stage('Maven Build') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo              MAVEN BUILD
@@ -248,6 +321,7 @@ pipeline {
 
         stage('Docker Build') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo              DOCKER BUILD
@@ -273,6 +347,7 @@ pipeline {
 
         stage('Docker Save') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo              DOCKER SAVE
@@ -296,11 +371,12 @@ pipeline {
         }
 
         // =====================================================
-        // 9. SSH CONNECTION
+        // 9. CHECK SSH CONNECTION
         // =====================================================
 
         stage('Check SSH Connection') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo          CHECK SSH CONNECTION
@@ -319,11 +395,12 @@ pipeline {
         }
 
         // =====================================================
-        // 10. TRANSFER IMAGE
+        // 10. TRANSFER DOCKER IMAGE
         // =====================================================
 
         stage('Transfer Docker Image') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo         TRANSFER DOCKER IMAGE
@@ -344,11 +421,12 @@ pipeline {
         }
 
         // =====================================================
-        // 11. DOCKER LOAD SERVER
+        // 11. DOCKER LOAD ON SERVER
         // =====================================================
 
         stage('Docker Load On Server') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo         DOCKER LOAD ON SERVER
@@ -369,11 +447,12 @@ pipeline {
         }
 
         // =====================================================
-        // 12. CHECK NETWORK
+        // 12. CHECK DOCKER NETWORK
         // =====================================================
 
         stage('Check Docker Network') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo          CHECK DOCKER NETWORK
@@ -394,11 +473,12 @@ pipeline {
         }
 
         // =====================================================
-        // 13. DEPLOY
+        // 13. DOCKER COMPOSE DEPLOY
         // =====================================================
 
         stage('Docker Compose Deploy') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo          DOCKER COMPOSE DEPLOY
@@ -424,6 +504,7 @@ pipeline {
 
         stage('Verify Container') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo            VERIFY CONTAINER
@@ -447,6 +528,7 @@ pipeline {
 
         stage('Health Check') {
             steps {
+
                 bat '''
                 echo ========================================
                 echo              HEALTH CHECK
@@ -463,6 +545,10 @@ pipeline {
                 echo APPLICATION HEALTH CHECK PASSED
                 echo ========================================
                 '''
+
+                script {
+                    env.DEPLOYMENT_RESULT = 'DEPLOYED - HEALTH UP'
+                }
             }
         }
     }
@@ -503,6 +589,8 @@ pipeline {
             echo "Email        : ${env.COMMIT_EMAIL}"
             echo "Commit       : ${env.COMMIT_ID}"
             echo "Test Percent : ${env.TEST_PERCENT}%"
+            echo "Dev Result   : ${env.DEV_SAVE_RESULT}"
+            echo "Deployment   : ${env.DEPLOYMENT_RESULT}"
             echo ''
             echo 'Check the failed stage above.'
             echo 'If tests are below 80%, DEV is NOT updated.'
@@ -518,19 +606,6 @@ pipeline {
 
                 def finalResult =
                     currentBuild.currentResult ?: 'UNKNOWN'
-
-                def deploymentResult =
-                    finalResult == 'SUCCESS'
-                        ? 'DEPLOYED'
-                        : 'NOT DEPLOYED / FAILED'
-
-                def devSaveResult =
-                    finalResult == 'SUCCESS'
-                        ? 'SAVED TO DEV'
-                        : 'NOT SAVED / PIPELINE FAILED'
-
-                def branchName =
-                    env.BRANCH_NAME ?: 'feature/ci-test'
 
                 def safeMessage =
                     (env.COMMIT_MESSAGE ?: '')
@@ -567,8 +642,8 @@ pipeline {
 
                 def row =
                     "\"${env.BUILD_NUMBER}\"," +
-                    "\"${new Date().format('yyyy-MM-dd HH:mm:ss')}\"," +
-                    "\"${branchName}\"," +
+                    "\"${env.BUILD_TIME ?: ''}\"," +
+                    "\"${env.SOURCE_BRANCH}\"," +
                     "\"${safeAuthor}\"," +
                     "\"${safeEmail}\"," +
                     "\"${env.COMMIT_ID ?: ''}\"," +
@@ -579,9 +654,9 @@ pipeline {
                     "\"${env.TEST_FAILED ?: '0'}\"," +
                     "\"${env.TEST_SKIPPED ?: '0'}\"," +
                     "\"${env.TEST_PERCENT ?: '0.00'}%\"," +
-                    "\"${devSaveResult}\"," +
+                    "\"${env.DEV_SAVE_RESULT}\"," +
                     "\"${finalResult}\"," +
-                    "\"${deploymentResult}\"," +
+                    "\"${env.DEPLOYMENT_RESULT}\"," +
                     "\"${env.BUILD_URL ?: ''}\""
 
                 def historyFile =
@@ -589,31 +664,27 @@ pipeline {
 
                 writeFile(
                     file: historyFile,
-                    text:
-                        header +
-                        System.lineSeparator() +
-                        row +
-                        System.lineSeparator()
+                    text: header + "\r\n" + row + "\r\n"
                 )
 
                 echo '============================================'
                 echo '              CI HISTORY RECORD'
                 echo '============================================'
                 echo "Build No     : ${env.BUILD_NUMBER}"
-                echo "Date         : ${new Date().format('yyyy-MM-dd HH:mm:ss')}"
+                echo "Date         : ${env.BUILD_TIME}"
                 echo "Author       : ${env.COMMIT_AUTHOR}"
                 echo "Email        : ${env.COMMIT_EMAIL}"
                 echo "Commit ID    : ${env.COMMIT_ID}"
                 echo "Message      : ${env.COMMIT_MESSAGE}"
-                echo "Branch       : ${branchName}"
+                echo "Branch       : ${env.SOURCE_BRANCH}"
                 echo "Total Tests  : ${env.TEST_TOTAL}"
                 echo "Passed       : ${env.TEST_PASSED}"
                 echo "Failed       : ${env.TEST_FAILED}"
                 echo "Skipped      : ${env.TEST_SKIPPED}"
                 echo "Pass Rate    : ${env.TEST_PERCENT}%"
-                echo "Dev Result   : ${devSaveResult}"
+                echo "Dev Result   : ${env.DEV_SAVE_RESULT}"
                 echo "Pipeline     : ${finalResult}"
-                echo "Deployment   : ${deploymentResult}"
+                echo "Deployment   : ${env.DEPLOYMENT_RESULT}"
                 echo '============================================'
             }
 
